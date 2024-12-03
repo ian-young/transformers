@@ -1,3 +1,7 @@
+# Ignore trained GPT models
+fine_tuned_verkada_gpt2
+results
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
