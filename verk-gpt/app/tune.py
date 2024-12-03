@@ -8,6 +8,7 @@ from transformers import (
 )
 import app.scrape  # Importing the scrape functionality
 
+
 # Function to scrape the data and save to text file
 def scrape_and_save():
     print("Scraping websites to gather data...")
@@ -21,6 +22,7 @@ def scrape_and_save():
     app.scrape.scrape_website(urls)  # Calling the scrape function to save data
     print("Scraping complete, data saved to verkada_data.txt.")
 
+
 # Load the scraped data
 with open("verkada_data.txt", "r", encoding="utf-8") as file:
     text_data = file.read()
@@ -28,10 +30,10 @@ with open("verkada_data.txt", "r", encoding="utf-8") as file:
 # Check if MPS is available on Apple Silicon
 if torch.backends.mps.is_available():
     device = torch.device("mps")
-    print("Using MPS for training!")
+elif torch.cuda.is_available():
+    device = torch.device("cuda")
 else:
     device = torch.device("cpu")
-    print("MPS is not available. Using CPU.")
 
 # Initialize the tokenizer and model
 tokenizer = GPT2Tokenizer.from_pretrained("gpt2-medium")
@@ -41,65 +43,76 @@ tokenizer.pad_token = tokenizer.eos_token  # Setting pad_token to eos_token
 model = GPT2LMHeadModel.from_pretrained("gpt2-medium")
 model.to(device)  # Move model to MPS or CPU
 
+
 # Function to split the text into chunks of max_length
 def chunk_text(text, chunk_size=512):
     # Tokenize the text into tokens
     tokens = tokenizer.encode(text)
     # Ensure that chunks are of size chunk_size or greater
     if len(tokens) < chunk_size:
-        print(f"Warning: Text is too short, padding it to {chunk_size} tokens.")
-        tokens += [tokenizer.pad_token_id] * (chunk_size - len(tokens))  # pad to max length
-    
+        print(
+            f"Warning: Text is too short, padding it to {chunk_size} tokens."
+        )
+        tokens += [tokenizer.pad_token_id] * (
+            chunk_size - len(tokens)
+        )  # pad to max length
+
     # Split the tokens into chunks of 512 tokens
-    return [tokens[i:i + chunk_size] for i in range(0, len(tokens), chunk_size)]
+    return [
+        tokens[i : i + chunk_size] for i in range(0, len(tokens), chunk_size)
+    ]
 
 
 # Tokenize the dataset (GPT-2 requires text to be tokenized)
 def tokenize_function(examples):
-    # Split long texts into chunks of max_length
-    chunked_texts = chunk_text(examples['text'], chunk_size=512)
-    
-    # Check if the chunked texts are empty or malformed
+    chunked_texts = chunk_text(examples["text"], chunk_size=512)
     if len(chunked_texts) == 0:
         print("Warning: Encountered empty token chunks.")
-    
-    # Flatten the list of token chunks and convert each chunk to the proper format
     input_ids = [chunk for chunk in chunked_texts]
-    print(f"Tokenized chunk lengths: {[len(chunk) for chunk in input_ids]}")  # Debug print
-
-    return {
-        'input_ids': input_ids,
-        'labels': input_ids,  # For GPT-2, the labels are the same as input_ids for causal LM
-    }
+    return {"input_ids": input_ids, "labels": input_ids}
 
 
-# Prepare dataset from the scraped data, splitting the text into smaller chunks
-dataset = Dataset.from_dict({"text": [text_data]})
-dataset = dataset.map(tokenize_function, batched=True)
+# Function to train the model
+def train_model(model, tokenizer):
+    # Load the scraped data
+    with open("verkada_data.txt", "r", encoding="utf-8") as file:
+        text_data = file.read()
 
-# Training arguments
-training_args = TrainingArguments(
-    output_dir="./results",          # output directory
-    num_train_epochs=3,              # number of training epochs
-    per_device_train_batch_size=1,   # batch size per device during training
-    per_device_eval_batch_size=1,    # batch size for evaluation
-    warmup_steps=500,                # number of warmup steps for learning rate scheduler
-    weight_decay=0.01,               # strength of weight decay
-    logging_dir='./logs',            # directory for storing logs
-    save_steps=500,                  # Save model every 500 steps
-    save_total_limit=2,              # Keep only the last two checkpoints
-)
+    # Check if MPS is available on Apple Silicon
+    device = torch.device(
+        "mps" if torch.backends.mps.is_available() else "cpu"
+    )
+    print(f"Using {device} for training.")
 
-# Trainer
-trainer = Trainer(
-    model=model,                         # the instantiated 🤗 Transformers model to be trained
-    args=training_args,                  # training arguments, defined above
-    train_dataset=dataset,               # training dataset
-)
+    model.to(device)  # Move model to MPS or CPU
 
-# Fine-tune the model
-trainer.train()
+    # Prepare dataset from the scraped data, splitting the text into smaller chunks
+    dataset = Dataset.from_dict({"text": [text_data]})
+    dataset = dataset.map(tokenize_function, batched=True)
 
-# Save the model after fine-tuning
-model.save_pretrained("./fine_tuned_verkada_gpt2")
-tokenizer.save_pretrained("./fine_tuned_verkada_gpt2")
+    # Training arguments
+    training_args = TrainingArguments(
+        output_dir="./results",  # output directory
+        num_train_epochs=3,  # number of training epochs
+        per_device_train_batch_size=1,  # batch size per device during training
+        per_device_eval_batch_size=1,  # batch size for evaluation
+        warmup_steps=500,  # number of warmup steps for learning rate scheduler
+        weight_decay=0.01,  # strength of weight decay
+        logging_dir="./logs",  # directory for storing logs
+        save_steps=500,  # Save model every 500 steps
+        save_total_limit=2,  # Keep only the last two checkpoints
+    )
+
+    # Trainer
+    trainer = Trainer(
+        model=model,
+        args=training_args,
+        train_dataset=dataset,
+    )
+
+    # Fine-tune the model
+    trainer.train()
+
+    # Save the model after fine-tuning
+    model.save_pretrained("./fine_tuned_verkada_gpt2")
+    tokenizer.save_pretrained("./fine_tuned_verkada_gpt2")

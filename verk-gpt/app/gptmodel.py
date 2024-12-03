@@ -1,21 +1,27 @@
 import torch
 from transformers import GPT2LMHeadModel, GPT2Tokenizer
 
-# Load GPT-2 Medium
-model_name = "gpt2-medium"
-model = GPT2LMHeadModel.from_pretrained(model_name)
-tokenizer = GPT2Tokenizer.from_pretrained(model_name)
 
+# Test query function
+def test_gpt2_query(model, tokenizer, query):
+    tokenizer.pad_token = tokenizer.eos_token  # Set pad_token
+    # Encode the input query
+    inputs = tokenizer.encode(
+        query,
+        return_tensors="pt",
+        padding=True,
+        truncation=True,
+        max_length=512,
+    )
 
-# Test query
-def test_gpt2_query(query):
-    # Encode input query
-    inputs = tokenizer.encode(query, return_tensors="pt")
+    # Generate attention mask: 1 for actual tokens, 0 for padding tokens
+    attention_mask = (inputs != tokenizer.pad_token_id).long()
 
-    # Generate a response
+    # Generate a response from the model
     with torch.no_grad():
         outputs = model.generate(
             inputs,
+            attention_mask=attention_mask,  # Pass the attention mask here
             max_length=100,
             num_return_sequences=1,
             no_repeat_ngram_size=2,
@@ -26,7 +32,14 @@ def test_gpt2_query(query):
     return response
 
 
-# Test the model with a simple query
-query = "Explain quantum physics to me like I'm a 5-year old."
-response = test_gpt2_query(query)
-print(f"Response: {response}")
+
+if __name__ == "__main__":
+    # Load the default GPT-2 model and tokenizer
+    model_name = "gpt2-medium"
+    tokenizer = GPT2Tokenizer.from_pretrained(model_name)
+    model = GPT2LMHeadModel.from_pretrained(model_name)
+
+    # Test the model with a simple query
+    query = "Explain quantum physics to me like I'm a 5-year old."
+    response = test_gpt2_query(model, tokenizer, query)
+    print(f"Response: {response}")

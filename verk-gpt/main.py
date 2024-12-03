@@ -14,7 +14,9 @@ train_model(model, tokenizer)  # Function that runs the training
 model = GPT2LMHeadModel.from_pretrained("./fine_tuned_verkada_gpt2")
 tokenizer = GPT2Tokenizer.from_pretrained("./fine_tuned_verkada_gpt2")
 
-# Step 4: Test the fine-tuned model
+# Step 4: Test the fine-tuned model using the custom query
 query = "What is Verkada access control?"
-response = app.test_gpt2_query(query)  # Testing the query function
+response = app.test_gpt2_query(
+    model, tokenizer, query
+)  # Use the fine-tuned model and tokenizer
 print(f"Response: {response}")
