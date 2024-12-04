@@ -3,6 +3,9 @@ fine_tuned_verkada_gpt2
 results
 verkada_data.txt
 
+# DS Store
+.DS_Store
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
