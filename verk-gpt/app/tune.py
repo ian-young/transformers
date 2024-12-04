@@ -1,12 +1,19 @@
+# pylint: disable=redefined-outer-name
+
+from os import cpu_count
+from threading import Lock
+
+import app.scrape  # Importing the scrape functionality
 import torch
 from datasets import Dataset
+from tqdm import tqdm
+
 from transformers import (
+    GPT2LMHeadModel,
+    GPT2Tokenizer,
     Trainer,
     TrainingArguments,
-    GPT2Tokenizer,
-    GPT2LMHeadModel,
 )
-import app.scrape  # Importing the scrape functionality
 
 # Check if MPS is available on Apple Silicon
 if torch.backends.mps.is_available():
@@ -29,6 +36,7 @@ model.to(device)  # Move model to MPS or CPU
 def scrape_and_save():
     print("Scraping websites to gather data...")
     visited_urls = set()
+    lock = Lock()
     urls = [
         "https://help.verkada.com",  # Main help site
         "https://docs.verkada.com",  # Product docs
@@ -37,80 +45,102 @@ def scrape_and_save():
         "https://verkada.com/pricing",  # Pricing page
     ]
     app.scrape.scrape_website(
-        urls, visited_urls
+        urls, visited_urls, lock
     )  # Calling the scrape function to save data
     print("Scraping complete, data saved to verkada_data.txt.")
 
 
 # Function to split the text into chunks of max_length
-def chunk_text(text, chunk_size=512):
-    # Tokenize the text into tokens
-    tokens = tokenizer.encode(text)
-    # Ensure that chunks are of size chunk_size or greater
-    if len(tokens) < chunk_size:
-        print(
-            f"Warning: Text is too short, padding it to {chunk_size} tokens."
-        )
-        tokens += [tokenizer.pad_token_id] * (
-            chunk_size - len(tokens)
-        )  # pad to max length
+def chunk_text(text, max_size=1024):
+    tokens = tokenizer.encode(text, add_special_tokens=True)
+    chunks = []
 
-    # Split the tokens into chunks of 512 tokens
-    return [
-        tokens[i : i + chunk_size] for i in range(0, len(tokens), chunk_size)
-    ]
+    # If the token list exceeds max_size, split further by tokens
+    while len(tokens) > max_size:
+        # print(f"Chunk exceeds max size of {max_size}, splitting further...")
+        part = tokens[:max_size]  # Get a part that fits within the token limit
+        chunks.append(tokenizer.decode(part, skip_special_tokens=True))
+        tokens = tokens[max_size:]  # Move to the next part
+
+    # After splitting, check for any remaining tokens and add them
+    if len(tokens) > 0:
+        chunks.append(tokenizer.decode(tokens, skip_special_tokens=True))
+
+    return chunks
 
 
 # Tokenize the dataset (GPT-2 requires text to be tokenized)
 def tokenize_function(examples):
-    chunked_texts = chunk_text(examples["text"], chunk_size=512)
-    if len(chunked_texts) == 0:
-        print("Warning: Encountered empty token chunks.")
-    input_ids = [chunk for chunk in chunked_texts]
-    return {"input_ids": input_ids, "labels": input_ids}
+    inputs = tokenizer(
+        examples["text"],
+        padding="max_length",
+        truncation=True,
+        max_length=1024,
+    )
+
+    # Labels are the same as input_ids
+    inputs["labels"] = inputs["input_ids"].copy()
+    return inputs
 
 
 # Function to train the model
-def train_model(model, tokenizer):
+def train_model(model, tokenizer, file_name):
     # Load the scraped data
-    with open("verkada_data.txt", "r", encoding="utf-8") as file:
-        text_data = file.read()
+    with open(file_name, "r", encoding="utf-8") as file:
+        text_data = file.read()  # Read the entire dataset as a single string
 
-    # Check if MPS is available on Apple Silicon
-    device = torch.device(
-        "mps" if torch.backends.mps.is_available() else "cpu"
-    )
-    print(f"Using {device} for training.")
+    # Split the text into smaller documents by double newlines
+    documents = text_data.split("\n\n")
 
-    model.to(device)  # Move model to MPS or CPU
+    # Chunk the documents into smaller pieces
+    chunked_docs = []
+    print("Documents that exceed the max length will be split further.")
+    for doc in tqdm(
+        iter(documents), total=len(documents), desc="Processing documents"
+    ):
+        chunked_docs.extend(chunk_text(doc))
 
-    # Prepare dataset from the scraped data, splitting the text into smaller chunks
-    dataset = Dataset.from_dict({"text": [text_data]})
+    # Create a dataset from the chunked documents
+    print(
+        f"Total chunks created: {len(chunked_docs)}"
+    )  # Debugging number of chunks created
+    dataset = Dataset.from_dict({"text": chunked_docs})
+
+    # Tokenize the dataset
     dataset = dataset.map(tokenize_function, batched=True)
 
-    # Training arguments
-    training_args = TrainingArguments(
-        output_dir="./results",  # output directory
-        num_train_epochs=3,  # number of training epochs
-        per_device_train_batch_size=1,  # batch size per device during training
-        per_device_eval_batch_size=1,  # batch size for evaluation
-        warmup_steps=500,  # number of warmup steps for learning rate scheduler
-        weight_decay=0.01,  # strength of weight decay
-        logging_dir="./logs",  # directory for storing logs
-        save_steps=500,  # Save model every 500 steps
-        save_total_limit=2,  # Keep only the last two checkpoints
+    # Ensure the dataset contains the correct columns
+    dataset.set_format(
+        type="torch", columns=["input_ids", "attention_mask", "labels"]
     )
 
-    # Trainer
+    # Define training arguments
+    training_args = TrainingArguments(
+        output_dir="./results",  # Output directory for model checkpoints
+        num_train_epochs=3,  # Number of training epochs
+        gradient_accumulation_steps=4,  # Accumulate gradients over 4 steps
+        per_device_train_batch_size=1,  # Batch size per device during training
+        per_device_eval_batch_size=1,  # Batch size for evaluation
+        warmup_steps=500,  # Number of warmup steps for learning rate scheduler
+        weight_decay=0.01,  # Weight decay strength
+        logging_dir="./logs",  # Directory for storing logs
+        save_steps=500,  # Save model every 500 steps
+        save_total_limit=2,  # Keep only the last two checkpoints
+        dataloader_num_workers=cpu_count(),  # Number of workers for data loading
+    )
+
+    # Initialize Trainer
     trainer = Trainer(
         model=model,
         args=training_args,
         train_dataset=dataset,
+        data_collator=None,  # Default collator should suffice here
     )
 
     # Fine-tune the model
+    print(f"Starting training on {device}...")
     trainer.train()
 
-    # Save the model after fine-tuning
+    # Save the fine-tuned model
     model.save_pretrained("./fine_tuned_verkada_gpt2")
     tokenizer.save_pretrained("./fine_tuned_verkada_gpt2")
