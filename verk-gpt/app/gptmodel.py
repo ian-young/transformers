@@ -32,7 +32,6 @@ def test_gpt2_query(model, tokenizer, query):
     return response
 
 
-
 if __name__ == "__main__":
     # Load the default GPT-2 model and tokenizer
     model_name = "gpt2-medium"

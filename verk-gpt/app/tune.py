@@ -8,25 +8,6 @@ from transformers import (
 )
 import app.scrape  # Importing the scrape functionality
 
-
-# Function to scrape the data and save to text file
-def scrape_and_save():
-    print("Scraping websites to gather data...")
-    urls = [
-        "https://help.verkada.com",  # Main help site
-        "https://docs.verkada.com",  # Product docs
-        "https://apidocs.verkada.com",  # API docs
-        "https://verkada.com",  # Home page
-        "https://verkada.com/pricing",  # Pricing page
-    ]
-    app.scrape.scrape_website(urls)  # Calling the scrape function to save data
-    print("Scraping complete, data saved to verkada_data.txt.")
-
-
-# Load the scraped data
-with open("verkada_data.txt", "r", encoding="utf-8") as file:
-    text_data = file.read()
-
 # Check if MPS is available on Apple Silicon
 if torch.backends.mps.is_available():
     device = torch.device("mps")
@@ -42,6 +23,23 @@ tokenizer.pad_token = tokenizer.eos_token  # Setting pad_token to eos_token
 # Make sure the model is loaded with the correct configuration
 model = GPT2LMHeadModel.from_pretrained("gpt2-medium")
 model.to(device)  # Move model to MPS or CPU
+
+
+# Function to scrape the data and save to text file
+def scrape_and_save():
+    print("Scraping websites to gather data...")
+    visited_urls = set()
+    urls = [
+        "https://help.verkada.com",  # Main help site
+        "https://docs.verkada.com",  # Product docs
+        "https://apidocs.verkada.com",  # API docs
+        "https://verkada.com",  # Home page
+        "https://verkada.com/pricing",  # Pricing page
+    ]
+    app.scrape.scrape_website(
+        urls, visited_urls
+    )  # Calling the scrape function to save data
+    print("Scraping complete, data saved to verkada_data.txt.")
 
 
 # Function to split the text into chunks of max_length
