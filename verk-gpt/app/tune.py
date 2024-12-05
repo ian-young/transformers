@@ -184,7 +184,7 @@ def train_model_with_dataset(model, tokenizer, dataset_name):
         logging_steps=200,  # Log less frequently
         run_name="Language and Personality",
         warmup_steps=500,
-        dataloader_num_workers=cpu_count() / 2,
+        dataloader_num_workers=int(cpu_count() / 2),
     )
 
     pause_callback = PauseTrainingCallback(
