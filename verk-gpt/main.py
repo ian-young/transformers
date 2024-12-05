@@ -1,3 +1,5 @@
+from os.path import exists
+
 import app
 from app.tune import (  # Importing the function to start training
     scrape_and_save,
@@ -9,6 +11,7 @@ from transformers import GPT2LMHeadModel, GPT2Tokenizer
 USE_BACKUP = True
 MODEL_NAME = "gpt2"
 QUERY = "What is Verkada access control?"
+CHECKPOINT_PATH = "./fine_tuned_verkada_gpt2"
 
 
 def main():
@@ -19,8 +22,18 @@ def main():
             scrape_and_save()
 
         # Step 2: Load the model and tokenizer (will be used for fine-tuning after training)
-        tokenizer = GPT2Tokenizer.from_pretrained(MODEL_NAME)
-        model = GPT2LMHeadModel.from_pretrained(MODEL_NAME)
+        if exists(CHECKPOINT_PATH):
+            # Load the partially-trained model
+            print(f"Loading model from checkpoint: {CHECKPOINT_PATH}")
+            model = GPT2LMHeadModel.from_pretrained(CHECKPOINT_PATH)
+            tokenizer = GPT2Tokenizer.from_pretrained(CHECKPOINT_PATH)
+        else:
+            # Start training a new model
+            print(
+                f"No checkpoint found. Initializing from base model: {MODEL_NAME}"
+            )
+            model = GPT2LMHeadModel.from_pretrained(MODEL_NAME)
+            tokenizer = GPT2Tokenizer.from_pretrained(MODEL_NAME)
 
         # Step 3: Start the training process (this will fine-tune the model)
         train_model(
