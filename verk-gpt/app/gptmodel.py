@@ -1,3 +1,7 @@
+# pylint: disable=redefined-outer-name
+
+from os.path import exists
+
 import torch
 from transformers import GPT2LMHeadModel, GPT2Tokenizer
 
@@ -21,10 +25,14 @@ def test_gpt2_query(model, tokenizer, query):
     with torch.no_grad():
         outputs = model.generate(
             inputs,
+            pad_token_id=tokenizer.eos_token_id,
             attention_mask=attention_mask,  # Pass the attention mask here
-            max_length=100,
             num_return_sequences=1,
-            no_repeat_ngram_size=2,
+            max_length=512,  # Allow for longer responses
+            no_repeat_ngram_size=2,  # Avoid reptitive phrases
+            temperature=0.7,  # Adjust randomness
+            top_k=50,  # Consider top 50 tokens each step
+            top_p=0.9,  # Use nucleus sampling for natural output
         )
 
     # Decode the response
@@ -35,8 +43,18 @@ def test_gpt2_query(model, tokenizer, query):
 if __name__ == "__main__":
     # Load the default GPT-2 model and tokenizer
     model_name = "gpt2-medium"
-    tokenizer = GPT2Tokenizer.from_pretrained(model_name)
-    model = GPT2LMHeadModel.from_pretrained(model_name)
+    if exists("./fine_tuned_verkada_gpt2"):
+        # Load the partially-trained model
+        print(f"Loading model from checkpoint: {"./fine_tuned_verkada_gpt2"}")
+        model = GPT2LMHeadModel.from_pretrained("./fine_tuned_verkada_gpt2")
+        tokenizer = GPT2Tokenizer.from_pretrained("./fine_tuned_verkada_gpt2")
+    else:
+        # Start training a new model
+        print(
+            f"No checkpoint found. Initializing from base model: {model_name}"
+        )
+        model = GPT2LMHeadModel.from_pretrained(model_name)
+        tokenizer = GPT2Tokenizer.from_pretrained(model_name)
 
     # Test the model with a simple query
     query = "Explain quantum physics to me like I'm a 5-year old."
