@@ -34,7 +34,8 @@ from os import cpu_count
 from threading import Lock
 from time import sleep
 
-import app.scrape  # Importing the scrape functionality
+import app.scrape as scrape  # Importing the scrape functionality
+import app.preprocess_data as preprocess_data
 import torch
 from datasets import Dataset
 from tqdm import tqdm
@@ -43,8 +44,8 @@ from transformers import (
     GPT2LMHeadModel,
     GPT2Tokenizer,
     Trainer,
-    TrainingArguments,
     TrainerCallback,
+    TrainingArguments,
 )
 
 # Check if MPS is available on Apple Silicon
@@ -109,7 +110,6 @@ class PauseTrainingCallback(TrainerCallback):
         return control
 
 
-# Function to scrape the data and save to text file
 def scrape_and_save():
     """
     Scrapes data from predefined websites and saves it to a file.
@@ -137,84 +137,73 @@ def scrape_and_save():
         "https://verkada.com",  # Home page
         "https://verkada.com/pricing",  # Pricing page
     ]
-    app.scrape.scrape_website(
+    scrape.scrape_website(
         urls, visited_urls, lock
     )  # Calling the scrape function to save data
     print("Scraping complete, data saved to verkada_data.txt.")
 
 
-# Function to split the text into chunks of max_length
-def chunk_text(text, max_size=1024):
+def train_model_with_dataset(model, tokenizer, dataset_name):
     """
-    Splits a given text into smaller chunks based on a maximum token size.
+    Trains a GPT-2 model using a specified dataset.
 
-    This function encodes the input text into tokens and divides it into
-    manageable chunks that do not exceed the specified maximum size. It ensures
-    that each chunk is properly decoded back into text format, making it
-    suitable for further processing.
+    This function loads and prepares the dataset for training, sets up the
+    training arguments, and initializes a Trainer to fine-tune the model.
+    After training, it saves the fine-tuned model and tokenizer to the
+    specified directory.
 
     Args:
-        text (str): The input text to be chunked.
-        max_size (int, optional): The maximum number of tokens allowed in each
-            chunk. Defaults to 1024.
+        model (PreTrainedModel): The GPT-2 model to be trained.
+        tokenizer (PreTrainedTokenizer): The tokenizer associated with the
+            model.
+        dataset_name (str): The name of the dataset to be used for training.
 
     Returns:
-        list: A list of text chunks, each containing up to max_size tokens.
+        None
 
     Examples:
-        chunks = chunk_text("Your long text here...", max_size=512)
+        train_model_with_dataset(my_model, my_tokenizer, "squad")
     """
-    tokens = tokenizer.encode(text, add_special_tokens=True)
-    chunks = []
-
-    # If the token list exceeds max_size, split further by tokens
-    while len(tokens) > max_size:
-        # print(f"Chunk exceeds max size of {max_size}, splitting further...")
-        part = tokens[:max_size]  # Get a part that fits within the token limit
-        chunks.append(tokenizer.decode(part, skip_special_tokens=True))
-        tokens = tokens[max_size:]  # Move to the next part
-
-    # After splitting, check for any remaining tokens and add them
-    if len(tokens) > 0:
-        chunks.append(tokenizer.decode(tokens, skip_special_tokens=True))
-
-    return chunks
-
-
-# Tokenize the dataset (GPT-2 requires text to be tokenized)
-def tokenize_function(examples):
-    """
-    Tokenizes input text examples and prepares them for model training.
-
-    This function takes a dictionary of examples, tokenizes the text, and
-    ensures that the resulting token sequences are properly padded and
-    truncated to a maximum length. It also creates labels that are identical
-    to the input token IDs, making it suitable for supervised learning tasks.
-
-    Args:
-        examples (dict): A dictionary containing the text examples to be tokenized.
-
-    Returns:
-        dict: A dictionary containing the tokenized inputs and labels.
-
-    Examples:
-        tokenized_inputs = tokenize_function(
-            {"text": "Sample text for tokenization."}
-        )
-    """
-    inputs = tokenizer(
-        examples["text"],
-        padding="max_length",
-        truncation=True,
-        max_length=1024,
+    train_data, val_data = preprocess_data.load_and_prepare_dataset(
+        dataset_name=dataset_name, tokenizer=tokenizer
     )
 
-    # Labels are the same as input_ids
-    inputs["labels"] = inputs["input_ids"].copy()
-    return inputs
+    training_args = TrainingArguments(
+        output_dir="./results",
+        num_train_epochs=2,  # Decrease epochs if needed
+        per_device_train_batch_size=2,  # Increase batch size (depends on GPU)
+        save_steps=500,  # Save less frequently
+        save_total_limit=2,
+        logging_dir="./logs",
+        eval_strategy="steps" if val_data else "no",
+        eval_steps=500,  # Adjust based on your use case
+        # Enble if GPU is present
+        # fp16=True,  # Enable mixed precision (only works on supported hardware)
+        load_best_model_at_end=True,  # Always return the best model
+        gradient_accumulation_steps=2,  # If your batch size is increased, use gradient accumulation
+        logging_steps=200,  # Log less frequently
+        run_name="Language and Personality",
+        warmup_steps=500,
+        dataloader_num_workers=cpu_count() / 2,
+    )
+
+    pause_callback = PauseTrainingCallback(
+        pause_after_steps=200, pause_duration=15
+    )
+
+    trainer = Trainer(
+        model=model,
+        args=training_args,
+        train_dataset=train_data,
+        eval_dataset=val_data,
+        callbacks=[pause_callback],
+    )
+
+    trainer.train()
+    model.save_pretrained("./fine_tuned_gpt2")
+    tokenizer.save_pretrained("./fine_tuned_gpt2")
 
 
-# Function to train the model
 def train_model(model, tokenizer, file_name):
     """
     Trains a model using text data from a specified file.
@@ -249,7 +238,9 @@ def train_model(model, tokenizer, file_name):
     for doc in tqdm(
         iter(documents), total=len(documents), desc="Processing documents"
     ):
-        chunked_docs.extend(chunk_text(doc))
+        chunked_docs.extend(
+            preprocess_data.chunk_text(doc, tokenizer=tokenizer)
+        )
 
     # Create a dataset from the chunked documents
     print(
@@ -258,7 +249,12 @@ def train_model(model, tokenizer, file_name):
     dataset = Dataset.from_dict({"text": chunked_docs})
 
     # Tokenize the dataset
-    dataset = dataset.map(tokenize_function, batched=True)
+    dataset = dataset.map(
+        lambda examples: preprocess_data.tokenize_function(
+            examples=examples, tokenizer=tokenizer
+        ),
+        batched=True,
+    )
 
     # Ensure the dataset contains the correct columns
     dataset.set_format(
@@ -276,8 +272,12 @@ def train_model(model, tokenizer, file_name):
         weight_decay=0.01,  # Weight decay strength
         logging_dir="./logs",  # Directory for storing logs
         save_steps=500,  # Save model every 500 steps
+        # Enble if GaPU is present
+        # fp16=True,  # Enable mixed precision (only works on supported hardware)
         save_total_limit=2,  # Keep only the last two checkpoints
         dataloader_num_workers=cpu_count(),  # Number of workers for data loading
+        load_best_model_at_end=True,
+        run_name="Verkada Model",
     )
 
     pause_callback = PauseTrainingCallback(

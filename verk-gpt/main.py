@@ -30,6 +30,7 @@ Usage:
 from os.path import exists
 
 import app
+import app.chat_train as chat_train
 from app.tune import (  # Importing the function to start training
     scrape_and_save,
     train_model,
@@ -38,6 +39,8 @@ from app.tune import (  # Importing the function to start training
 from transformers import GPT2LMHeadModel, GPT2Tokenizer
 
 USE_BACKUP = True
+TRAIN_CHAT = True
+V_TRAIN = False
 MODEL_NAME = "gpt2"
 QUERY = "What is Verkada access control?"
 CHECKPOINT_PATH = "./fine_tuned_verkada_gpt2"
@@ -76,16 +79,46 @@ def main():
             model = GPT2LMHeadModel.from_pretrained(MODEL_NAME)
             tokenizer = GPT2Tokenizer.from_pretrained(MODEL_NAME)
 
-        # Step 3: Start the training process (this will fine-tune the model)
-        train_model(
-            model,
-            tokenizer,
-            "verkada_data_backup.txt" if USE_BACKUP else "verkada_data.txt",
-        )
+        tokenizer.pad_token = tokenizer.eos_token
 
-        # Step 4: After training, load the fine-tuned model
-        model = GPT2LMHeadModel.from_pretrained("./fine_tuned_verkada_gpt2")
-        tokenizer = GPT2Tokenizer.from_pretrained("./fine_tuned_verkada_gpt2")
+        # Step 3: Start the training process (this will fine-tune the model)
+        if TRAIN_CHAT:
+            print("Training chat-like behavior and developing personality.")
+
+            # Can use personachat, dailydialog, squad, and/or multi_woz_v22
+            chat_train.fine_tune_chatbot(
+                model, tokenizer, ["AlekseyKorshuk/persona-chat"]
+            )
+            model = GPT2LMHeadModel.from_pretrained(
+                "./fine_tuned_verkada_gpt2"
+            )
+            tokenizer = GPT2Tokenizer.from_pretrained(
+                "./fine_tuned_verkada_gpt2"
+            )
+        else:
+            print("Skipping chat training.")
+
+        if V_TRAIN:
+            print("Training on Verkada.")
+            train_model(
+                model,
+                tokenizer,
+                (
+                    "verkada_data_backup.txt"
+                    if USE_BACKUP
+                    else "verkada_data.txt"
+                ),
+            )
+        else:
+            print("Skipping product training")
+
+            # Step 4: After training, load the fine-tuned model
+            model = GPT2LMHeadModel.from_pretrained(
+                "./fine_tuned_verkada_gpt2"
+            )
+            tokenizer = GPT2Tokenizer.from_pretrained(
+                "./fine_tuned_verkada_gpt2"
+            )
 
         # Step 5: Test the fine-tuned model using the custom query
         response = app.test_gpt2_query(
