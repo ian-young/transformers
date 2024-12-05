@@ -1,3 +1,33 @@
+"""
+Author: Ian Young
+
+This module provides functionality for training a GPT-2 model using scraped
+text data.
+
+It includes functions for scraping data from websites, processing the text
+into manageable chunks, tokenizing the data, and fine-tuning the GPT-2 model.
+The module also defines a callback to pause training at specified intervals
+to manage resource usage.
+
+Classes:
+    PauseTrainingCallback: A callback to pause training after a specified
+    number of steps.
+
+Functions:
+    scrape_and_save: Scrapes data from predefined websites and saves it to
+        a file.
+    chunk_text: Splits a given text into smaller chunks based on a maximum
+        token size.
+    tokenize_function: Tokenizes input text examples and prepares them for
+        model training.
+    train_model: Trains a model using text data from a specified file.
+
+Usage:
+    The module can be imported and used to scrape data, train a model, and
+    fine-tune it for specific tasks. It is designed to handle the entire
+    workflow from data collection to model training.
+"""
+
 # pylint: disable=redefined-outer-name
 
 from os import cpu_count
@@ -35,12 +65,30 @@ model.to(device)  # Move model to MPS or CPU
 
 
 class PauseTrainingCallback(TrainerCallback):
+    """
+    Callback to pause training after a specified number of steps.
+
+    This callback allows the training process to pause for a defined
+    duration after a certain number of steps have been completed. It is
+    useful for managing resource usage and preventing overheating during
+    long training sessions.
+
+    Args:
+        pause_after_steps (int): Number of steps after which to pause
+            training.
+        pause_duration (int): Duration of the pause in seconds.
+
+    Methods:
+        on_step_end: Pauses training if the current step is a multiple of
+        the specified pause_after_steps.
+    """
     def __init__(self, pause_after_steps, pause_duration):
         """
         Callback to pause training after a specified number of steps.
 
         Args:
-            pause_after_steps (int): Number of steps after which to pause training.
+            pause_after_steps (int): Number of steps after which to paus
+                training.
             pause_duration (int): Duration of the pause in seconds.
         """
         self.pause_after_steps = pause_after_steps
@@ -53,7 +101,8 @@ class PauseTrainingCallback(TrainerCallback):
             and state.global_step > 0
         ):
             print(
-                f"Pausing training at step {state.global_step} for {self.pause_duration}s to cool down."
+                f"Pausing training at step {state.global_step} for "
+                f"{self.pause_duration}s to cool down."
             )
             sleep(self.pause_duration)
         return control
@@ -61,6 +110,22 @@ class PauseTrainingCallback(TrainerCallback):
 
 # Function to scrape the data and save to text file
 def scrape_and_save():
+    """
+    Scrapes data from predefined websites and saves it to a file.
+
+    This function initiates the web scraping process by visiting a list of
+    specified URLs. It collects data from these sites and ensures that the
+    scraping is thread-safe by using a lock mechanism.
+
+    Args:
+        None
+
+    Returns:
+        None
+
+    Examples:
+        scrape_and_save()
+    """
     print("Scraping websites to gather data...")
     visited_urls = set()
     lock = Lock()
@@ -79,6 +144,25 @@ def scrape_and_save():
 
 # Function to split the text into chunks of max_length
 def chunk_text(text, max_size=1024):
+    """
+    Splits a given text into smaller chunks based on a maximum token size.
+
+    This function encodes the input text into tokens and divides it into
+    manageable chunks that do not exceed the specified maximum size. It ensures
+    that each chunk is properly decoded back into text format, making it
+    suitable for further processing.
+
+    Args:
+        text (str): The input text to be chunked.
+        max_size (int, optional): The maximum number of tokens allowed in each
+            chunk. Defaults to 1024.
+
+    Returns:
+        list: A list of text chunks, each containing up to max_size tokens.
+
+    Examples:
+        chunks = chunk_text("Your long text here...", max_size=512)
+    """
     tokens = tokenizer.encode(text, add_special_tokens=True)
     chunks = []
 
@@ -98,6 +182,25 @@ def chunk_text(text, max_size=1024):
 
 # Tokenize the dataset (GPT-2 requires text to be tokenized)
 def tokenize_function(examples):
+    """
+    Tokenizes input text examples and prepares them for model training.
+
+    This function takes a dictionary of examples, tokenizes the text, and
+    ensures that the resulting token sequences are properly padded and
+    truncated to a maximum length. It also creates labels that are identical
+    to the input token IDs, making it suitable for supervised learning tasks.
+
+    Args:
+        examples (dict): A dictionary containing the text examples to be tokenized.
+
+    Returns:
+        dict: A dictionary containing the tokenized inputs and labels.
+
+    Examples:
+        tokenized_inputs = tokenize_function(
+            {"text": "Sample text for tokenization."}
+        )
+    """
     inputs = tokenizer(
         examples["text"],
         padding="max_length",
@@ -112,6 +215,26 @@ def tokenize_function(examples):
 
 # Function to train the model
 def train_model(model, tokenizer, file_name):
+    """
+    Trains a model using text data from a specified file.
+
+    This function loads text data, processes it into manageable chunks,
+    and fine-tunes the provided model using the processed dataset. It
+    sets up training parameters, initializes a trainer, and saves the
+    fine-tuned model and tokenizer after training.
+
+    Args:
+        model (PreTrainedModel): The model to be trained.
+        tokenizer (PreTrainedTokenizer): The tokenizer associated with
+            the model.
+        file_name (str): The path to the file containing the training data.
+
+    Returns:
+        None
+
+    Examples:
+        train_model(my_model, my_tokenizer, "data.txt")
+    """
     # Load the scraped data
     with open(file_name, "r", encoding="utf-8") as file:
         text_data = file.read()  # Read the entire dataset as a single string
