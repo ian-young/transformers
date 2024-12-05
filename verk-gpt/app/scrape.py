@@ -27,7 +27,6 @@ Usage:
     and save the scraped data to a file.
 """
 
-
 import threading
 import math
 import re

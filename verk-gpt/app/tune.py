@@ -82,6 +82,7 @@ class PauseTrainingCallback(TrainerCallback):
         on_step_end: Pauses training if the current step is a multiple of
         the specified pause_after_steps.
     """
+
     def __init__(self, pause_after_steps, pause_duration):
         """
         Callback to pause training after a specified number of steps.
@@ -245,7 +246,9 @@ def train_model(model, tokenizer, file_name):
     # Chunk the documents into smaller pieces
     chunked_docs = []
     print("Documents that exceed the max length will be split further.")
-    for doc in tqdm(iter(documents), total=len(documents), desc="Processing documents"):
+    for doc in tqdm(
+        iter(documents), total=len(documents), desc="Processing documents"
+    ):
         chunked_docs.extend(chunk_text(doc))
 
     # Create a dataset from the chunked documents

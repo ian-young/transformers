@@ -82,7 +82,8 @@ def test_gpt2_query(model, tokenizer, query):
             top_p=0.9,  # Use nucleus sampling for natural output
             do_sample=True,  # Enable sampling for creativity
             repetition_penalty=1.2,  # Penalize repeated tokens
-            length_penalty=1.1  # Encourage shorter responses
+            length_penalty=1.1,  # Encourage shorter responses
+            num_beams=4,  # Use 4 beams to consider outputs
         )
 
     # Decode the response
@@ -106,6 +107,6 @@ if __name__ == "__main__":
         tokenizer = GPT2Tokenizer.from_pretrained(MODEL_NAME)
 
     # Test the model with a simple query
-    QUERY = "Explain quantum physics to me like I'm a 5-year old."
+    QUERY = "Explain the difference between the CD52 and CD42."
     response = test_gpt2_query(model, tokenizer, QUERY)
     print(f"Response: {response}")
