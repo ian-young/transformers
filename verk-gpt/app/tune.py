@@ -1,7 +1,9 @@
 # pylint: disable=redefined-outer-name
 
+from concurrent.futures import ThreadPoolExecutor
 from os import cpu_count
 from threading import Lock
+from time import sleep
 
 import app.scrape  # Importing the scrape functionality
 import torch
@@ -13,6 +15,7 @@ from transformers import (
     GPT2Tokenizer,
     Trainer,
     TrainingArguments,
+    TrainerCallback,
 )
 
 # Check if MPS is available on Apple Silicon
@@ -30,6 +33,31 @@ tokenizer.pad_token = tokenizer.eos_token  # Setting pad_token to eos_token
 # Make sure the model is loaded with the correct configuration
 model = GPT2LMHeadModel.from_pretrained("gpt2-medium")
 model.to(device)  # Move model to MPS or CPU
+
+
+class PauseTrainingCallback(TrainerCallback):
+    def __init__(self, pause_after_steps, pause_duration):
+        """
+        Callback to pause training after a specified number of steps.
+
+        Args:
+            pause_after_steps (int): Number of steps after which to pause training.
+            pause_duration (int): Duration of the pause in seconds.
+        """
+        self.pause_after_steps = pause_after_steps
+        self.pause_duration = pause_duration
+
+    def on_step_end(self, args, state, control, **kwargs):
+        # Pause after the specified number of steps
+        if (
+            state.global_step % self.pause_after_steps == 0
+            and state.global_step > 0
+        ):
+            print(
+                f"Pausing training at step {state.global_step} for {self.pause_duration}s to cool down."
+            )
+            sleep(self.pause_duration)
+        return control
 
 
 # Function to scrape the data and save to text file
@@ -93,12 +121,19 @@ def train_model(model, tokenizer, file_name):
     documents = text_data.split("\n\n")
 
     # Chunk the documents into smaller pieces
-    chunked_docs = []
+    chunked_docs, results = [], []
     print("Documents that exceed the max length will be split further.")
-    for doc in tqdm(
-        iter(documents), total=len(documents), desc="Processing documents"
-    ):
-        chunked_docs.extend(chunk_text(doc))
+    with ThreadPoolExecutor(max_workers=cpu_count() * 2) as executor:
+        results = list(
+            tqdm(
+                executor.map(chunk_text, documents),
+                total=len(documents),
+                desc="Processing documents",
+            )
+        )
+
+    for result in results:
+        chunked_docs.extend(result)
 
     # Create a dataset from the chunked documents
     print(
@@ -129,12 +164,16 @@ def train_model(model, tokenizer, file_name):
         dataloader_num_workers=cpu_count(),  # Number of workers for data loading
     )
 
+    pause_callback = PauseTrainingCallback(
+        pause_after_steps=100, pause_duration=30
+    )
+
     # Initialize Trainer
     trainer = Trainer(
         model=model,
         args=training_args,
         train_dataset=dataset,
-        data_collator=None,  # Default collator should suffice here
+        callbacks=[pause_callback],  # pause to allow cool down period
     )
 
     # Fine-tune the model
