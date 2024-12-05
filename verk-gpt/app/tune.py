@@ -1,6 +1,5 @@
 # pylint: disable=redefined-outer-name
 
-from concurrent.futures import ThreadPoolExecutor
 from os import cpu_count
 from threading import Lock
 from time import sleep
@@ -121,19 +120,10 @@ def train_model(model, tokenizer, file_name):
     documents = text_data.split("\n\n")
 
     # Chunk the documents into smaller pieces
-    chunked_docs, results = [], []
+    chunked_docs = []
     print("Documents that exceed the max length will be split further.")
-    with ThreadPoolExecutor(max_workers=cpu_count() * 2) as executor:
-        results = list(
-            tqdm(
-                executor.map(chunk_text, documents),
-                total=len(documents),
-                desc="Processing documents",
-            )
-        )
-
-    for result in results:
-        chunked_docs.extend(result)
+    for doc in tqdm(iter(documents), total=len(documents), desc="Processing documents"):
+        chunked_docs.extend(chunk_text(doc))
 
     # Create a dataset from the chunked documents
     print(
@@ -165,7 +155,7 @@ def train_model(model, tokenizer, file_name):
     )
 
     pause_callback = PauseTrainingCallback(
-        pause_after_steps=100, pause_duration=30
+        pause_after_steps=500, pause_duration=60
     )
 
     # Initialize Trainer

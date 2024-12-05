@@ -54,25 +54,23 @@ def scrape_urls(urls, visited_urls, lock):
             print(f"Extracting text from PDF at {url}...")
             pdf_text = extract_text_from_pdf(response.content)
             data += pdf_text + "\n\n"
-        else:
-            # If it's HTML, process it normally
-            if "text/html" in response.headers.get("Content-Type", ""):
+        elif "text/html" in response.headers.get("Content-Type", ""):
 
-                # Get all paragraphs and headings
-                paragraphs = soup.find_all(
-                    ["p", "h1", "h2", "h3", "h4", "h5", "h6"]
-                )
-                content = " ".join(
-                    [
-                        para.get_text().strip()
-                        for para in paragraphs
-                        if "Sorry, Internet Explorer is not supported"
-                        not in para.get_text()
-                    ]
-                )
-                data += content + "\n\n"
-            else:
-                print(f"Skipping non-HTML content from {url}")
+            # Get all paragraphs and headings
+            paragraphs = soup.find_all(
+                ["p", "h1", "h2", "h3", "h4", "h5", "h6"]
+            )
+            content = " ".join(
+                [
+                    para.get_text().strip()
+                    for para in paragraphs
+                    if "Sorry, Internet Explorer is not supported"
+                    not in para.get_text()
+                ]
+            )
+            data += content + "\n\n"
+        else:
+            print(f"Skipping non-HTML content from {url}")
 
         # Save the scraped data to a file
         with lock:
@@ -105,8 +103,7 @@ def scrape_links(url, soup, urls, visited_urls, lock):
     links = soup.find_all("a", href=True)
 
     for link in links:
-        href = link.get("href")
-        if href:
+        if href := link.get("href"):
             # Skip fragment links (e.g., #content) or links with invalid schemes
             if href.startswith("#") or not href.startswith(("http", "https")):
                 continue
