@@ -60,13 +60,16 @@ def set_torch_device(model):
     # Check if MPS is available on Apple Silicon
     if torch.backends.mps.is_available():
         device = torch.device("mps")
+        device_name="mps"
     elif torch.cuda.is_available():
         device = torch.device("cuda")
+        device_name="cuda"
     else:
         device = torch.device("cpu")
+        device_name="cpu"
 
     model.to(device)  # Move model to GPU, MPS, or CPU
-    return model, device
+    return model, device_name
 
 
 class PauseTrainingCallback(TrainerCallback):
@@ -177,21 +180,19 @@ def train_model_with_dataset(model, tokenizer, dataset_name):
     if device == "cuda":
         training_args = TrainingArguments(
             output_dir="./results",
-            num_train_epochs=2,  # Decrease epochs if needed
-            per_device_train_batch_size=2,  # Increase batch size (depends on GPU)
+            num_train_epochs=1,  # Decrease epochs if needed
+            per_device_train_batch_size=3,  # Increase batch size (depends on GPU)
             save_steps=500,  # Save less frequently
             save_total_limit=2,
             logging_dir="./logs",
             eval_strategy="steps" if val_data else "no",
             eval_steps=500,  # Adjust based on your use case
-            # Enable if GPU is present
             fp16=True,  # Enable mixed precision (only works on supported hardware)
             load_best_model_at_end=True,  # Always return the best model
-            gradient_accumulation_steps=2,  # If your batch size is increased, use gradient accumulation
             logging_steps=200,  # Log less frequently
             run_name="Language and Personality",
             warmup_steps=500,
-            dataloader_num_workers=int(cpu_count() / 2),
+            dataloader_num_workers=int(cpu_count()),
         )
         pause_callback = PauseTrainingCallback(
             pause_after_steps=10000, pause_duration=15
@@ -227,8 +228,8 @@ def train_model_with_dataset(model, tokenizer, dataset_name):
 
     print(f"Starting training on {device}...")
     trainer.train()
-    model.save_pretrained("./fine_tuned_gpt2")
-    tokenizer.save_pretrained("./fine_tuned_gpt2")
+    model.save_pretrained("./fine_tuned_verkada_gpt2")
+    tokenizer.save_pretrained("./fine_tuned_verkada_gpt2")
 
 
 def train_model(model, tokenizer, file_name):
