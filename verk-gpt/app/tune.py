@@ -41,28 +41,32 @@ from datasets import Dataset
 from tqdm import tqdm
 
 from transformers import (
-    GPT2LMHeadModel,
-    GPT2Tokenizer,
     Trainer,
     TrainerCallback,
     TrainingArguments,
 )
 
-# Check if MPS is available on Apple Silicon
-if torch.backends.mps.is_available():
-    device = torch.device("mps")
-elif torch.cuda.is_available():
-    device = torch.device("cuda")
-else:
-    device = torch.device("cpu")
+def set_torch_device(model):
+    """Sets the appropriate device for the model based on the available
+    hardware.
 
-# Initialize the tokenizer and model
-tokenizer = GPT2Tokenizer.from_pretrained("gpt2-medium")
-tokenizer.pad_token = tokenizer.eos_token  # Setting pad_token to eos_token
+    Args:
+        model: The model to be set on the appropriate device.
 
-# Make sure the model is loaded with the correct configuration
-model = GPT2LMHeadModel.from_pretrained("gpt2-medium")
-model.to(device)  # Move model to MPS or CPU
+    Returns:
+        model: The model with the device set.
+        device: The device being used (GPU, CPU, or MPS).
+    """
+    # Check if MPS is available on Apple Silicon
+    if torch.backends.mps.is_available():
+        device = torch.device("mps")
+    elif torch.cuda.is_available():
+        device = torch.device("cuda")
+    else:
+        device = torch.device("cpu")
+
+    model.to(device)  # Move model to GPU, MPS, or CPU
+    return model, device
 
 
 class PauseTrainingCallback(TrainerCallback):
@@ -89,7 +93,7 @@ class PauseTrainingCallback(TrainerCallback):
         Callback to pause training after a specified number of steps.
 
         Args:
-            pause_after_steps (int): Number of steps after which to paus
+            pause_after_steps (int): Number of steps after which to pause
                 training.
             pause_duration (int): Duration of the pause in seconds.
         """
@@ -102,10 +106,11 @@ class PauseTrainingCallback(TrainerCallback):
             state.global_step % self.pause_after_steps == 0
             and state.global_step > 0
         ):
-            print(
-                f"Pausing training at step {state.global_step} for "
-                f"{self.pause_duration}s to cool down."
-            )
+            # Uncomment for added verbosity
+            # print(
+            #     f"Pausing training at step {state.global_step} for "
+            #     f"{self.pause_duration}s to cool down."
+            # )
             sleep(self.pause_duration)
         return control
 
@@ -164,32 +169,53 @@ def train_model_with_dataset(model, tokenizer, dataset_name):
     Examples:
         train_model_with_dataset(my_model, my_tokenizer, "squad")
     """
+    model, device = set_torch_device(model=model)
     train_data, val_data = preprocess_data.load_and_prepare_dataset(
         dataset_name=dataset_name, tokenizer=tokenizer
     )
 
-    training_args = TrainingArguments(
-        output_dir="./results",
-        num_train_epochs=2,  # Decrease epochs if needed
-        per_device_train_batch_size=2,  # Increase batch size (depends on GPU)
-        save_steps=500,  # Save less frequently
-        save_total_limit=2,
-        logging_dir="./logs",
-        eval_strategy="steps" if val_data else "no",
-        eval_steps=500,  # Adjust based on your use case
-        # Enble if GPU is present
-        # fp16=True,  # Enable mixed precision (only works on supported hardware)
-        load_best_model_at_end=True,  # Always return the best model
-        gradient_accumulation_steps=2,  # If your batch size is increased, use gradient accumulation
-        logging_steps=200,  # Log less frequently
-        run_name="Language and Personality",
-        warmup_steps=500,
-        dataloader_num_workers=int(cpu_count() / 2),
-    )
-
-    pause_callback = PauseTrainingCallback(
-        pause_after_steps=200, pause_duration=15
-    )
+    if device == "cuda":
+        training_args = TrainingArguments(
+            output_dir="./results",
+            num_train_epochs=2,  # Decrease epochs if needed
+            per_device_train_batch_size=2,  # Increase batch size (depends on GPU)
+            save_steps=500,  # Save less frequently
+            save_total_limit=2,
+            logging_dir="./logs",
+            eval_strategy="steps" if val_data else "no",
+            eval_steps=500,  # Adjust based on your use case
+            # Enable if GPU is present
+            fp16=True,  # Enable mixed precision (only works on supported hardware)
+            load_best_model_at_end=True,  # Always return the best model
+            gradient_accumulation_steps=2,  # If your batch size is increased, use gradient accumulation
+            logging_steps=200,  # Log less frequently
+            run_name="Language and Personality",
+            warmup_steps=500,
+            dataloader_num_workers=int(cpu_count() / 2),
+        )
+        pause_callback = PauseTrainingCallback(
+            pause_after_steps=10000, pause_duration=15
+        )
+    else:
+        training_args = TrainingArguments(
+            output_dir="./results",
+            num_train_epochs=2,  # Decrease epochs if needed
+            per_device_train_batch_size=2,  # Increase batch size (depends on GPU)
+            save_steps=500,  # Save less frequently
+            save_total_limit=2,
+            logging_dir="./logs",
+            eval_strategy="steps" if val_data else "no",
+            eval_steps=500,  # Adjust based on your use case
+            load_best_model_at_end=True,  # Always return the best model
+            gradient_accumulation_steps=2,  # If your batch size is increased, use gradient accumulation
+            logging_steps=200,  # Log less frequently
+            run_name="Language and Personality",
+            warmup_steps=500,
+            dataloader_num_workers=int(cpu_count() / 2),
+        )
+        pause_callback = PauseTrainingCallback(
+            pause_after_steps=500, pause_duration=60
+        )
 
     trainer = Trainer(
         model=model,
@@ -199,6 +225,7 @@ def train_model_with_dataset(model, tokenizer, dataset_name):
         callbacks=[pause_callback],
     )
 
+    print(f"Starting training on {device}...")
     trainer.train()
     model.save_pretrained("./fine_tuned_gpt2")
     tokenizer.save_pretrained("./fine_tuned_gpt2")
@@ -225,6 +252,7 @@ def train_model(model, tokenizer, file_name):
     Examples:
         train_model(my_model, my_tokenizer, "data.txt")
     """
+    model, device = set_torch_device(model=model)
     # Load the scraped data
     with open(file_name, "r", encoding="utf-8") as file:
         text_data = file.read()  # Read the entire dataset as a single string
@@ -261,28 +289,53 @@ def train_model(model, tokenizer, file_name):
         type="torch", columns=["input_ids", "attention_mask", "labels"]
     )
 
-    # Define training arguments
-    training_args = TrainingArguments(
-        output_dir="./results",  # Output directory for model checkpoints
-        num_train_epochs=3,  # Number of training epochs
-        gradient_accumulation_steps=4,  # Accumulate gradients over 4 steps
-        per_device_train_batch_size=1,  # Batch size per device during training
-        per_device_eval_batch_size=1,  # Batch size for evaluation
-        warmup_steps=500,  # Number of warmup steps for learning rate scheduler
-        weight_decay=0.01,  # Weight decay strength
-        logging_dir="./logs",  # Directory for storing logs
-        save_steps=500,  # Save model every 500 steps
-        # Enble if GaPU is present
-        # fp16=True,  # Enable mixed precision (only works on supported hardware)
-        save_total_limit=2,  # Keep only the last two checkpoints
-        dataloader_num_workers=cpu_count(),  # Number of workers for data loading
-        load_best_model_at_end=True,
-        run_name="Verkada Model",
-    )
+    if device == "cuda":
+        # Define training arguments
+        training_args = TrainingArguments(
+            output_dir="./results",  # Output directory for model checkpoints
+            num_train_epochs=3,  # Number of training epochs
+            gradient_accumulation_steps=4,  # Accumulate gradients over 4 steps
+            per_device_train_batch_size=1,  # Batch size per device during training
+            per_device_eval_batch_size=1,  # Batch size for evaluation
+            warmup_steps=500,  # Number of warmup steps for learning rate scheduler
+            weight_decay=0.01,  # Weight decay strength
+            logging_dir="./logs",  # Directory for storing logs
+            save_steps=500,  # Save model every 500 steps
+            # Enable if GaPU is present
+            fp16=True,  # Enable mixed precision (only works on supported hardware)
+            save_total_limit=2,  # Keep only the last two checkpoints
+            dataloader_num_workers=cpu_count(),  # Number of workers for data loading
+            load_best_model_at_end=True,
+            run_name="Verkada Model",
+        )
 
-    pause_callback = PauseTrainingCallback(
-        pause_after_steps=500, pause_duration=60
-    )
+        pause_callback = PauseTrainingCallback(
+            pause_after_steps=10000, pause_duration=15
+        )
+    else:
+        # Define training arguments
+        training_args = TrainingArguments(
+            output_dir="./results",  # Output directory for model checkpoints
+            num_train_epochs=3,  # Number of training epochs
+            gradient_accumulation_steps=4,  # Accumulate gradients over 4 steps
+            per_device_train_batch_size=1,  # Batch size per device during training
+            per_device_eval_batch_size=1,  # Batch size for evaluation
+            warmup_steps=500,  # Number of warmup steps for learning rate scheduler
+            weight_decay=0.01,  # Weight decay strength
+            logging_dir="./logs",  # Directory for storing logs
+            save_steps=500,  # Save model every 500 steps
+            # Enable if GaPU is present
+            fp16=True,  # Enable mixed precision (only works on supported hardware)
+            save_total_limit=2,  # Keep only the last two checkpoints
+            dataloader_num_workers=cpu_count(),  # Number of workers for data loading
+            load_best_model_at_end=True,
+            run_name="Verkada Model",
+        )
+
+        pause_callback = PauseTrainingCallback(
+            pause_after_steps=500, pause_duration=60
+        )
+        
 
     # Initialize Trainer
     trainer = Trainer(
