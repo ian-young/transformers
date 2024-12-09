@@ -85,9 +85,9 @@ def main():
         if TRAIN_CHAT:
             print("Training chat-like behavior and developing personality.")
 
-            # Can use personachat, dailydialog, squad, and/or multi_woz_v22
+            # Can use personachat, dailydialog, squad, squad_v2 and/or multi_woz_v22
             chat_train.fine_tune_chatbot(
-                model, tokenizer, ["AlekseyKorshuk/persona-chat"]
+                model, tokenizer, ["pfb30/multi_woz_v22"]
             )
             model = GPT2LMHeadModel.from_pretrained(
                 "./fine_tuned_verkada_gpt2"

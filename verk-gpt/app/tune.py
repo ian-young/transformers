@@ -46,6 +46,7 @@ from transformers import (
     TrainingArguments,
 )
 
+
 def set_torch_device(model):
     """Sets the appropriate device for the model based on the available
     hardware.
@@ -60,13 +61,13 @@ def set_torch_device(model):
     # Check if MPS is available on Apple Silicon
     if torch.backends.mps.is_available():
         device = torch.device("mps")
-        device_name="mps"
+        device_name = "mps"
     elif torch.cuda.is_available():
         device = torch.device("cuda")
-        device_name="cuda"
+        device_name = "cuda"
     else:
         device = torch.device("cpu")
-        device_name="cpu"
+        device_name = "cpu"
 
     model.to(device)  # Move model to GPU, MPS, or CPU
     return model, device_name
@@ -182,7 +183,8 @@ def train_model_with_dataset(model, tokenizer, dataset_name):
             output_dir="./results",
             num_train_epochs=1,  # Decrease epochs if needed
             per_device_train_batch_size=3,  # Increase batch size (depends on GPU)
-            save_steps=500,  # Save less frequently
+            gradient_accumulation_steps=2,
+            save_steps=500,
             save_total_limit=2,
             logging_dir="./logs",
             eval_strategy="steps" if val_data else "no",
@@ -200,15 +202,15 @@ def train_model_with_dataset(model, tokenizer, dataset_name):
     else:
         training_args = TrainingArguments(
             output_dir="./results",
-            num_train_epochs=2,  # Decrease epochs if needed
-            per_device_train_batch_size=2,  # Increase batch size (depends on GPU)
-            save_steps=500,  # Save less frequently
+            num_train_epochs=1,  # Decrease epochs if needed
+            per_device_train_batch_size=1,  # Increase batch size (depends on CPU)
+            gradient_accumulation_steps=6,
+            save_steps=500,
             save_total_limit=2,
             logging_dir="./logs",
             eval_strategy="steps" if val_data else "no",
             eval_steps=500,  # Adjust based on your use case
             load_best_model_at_end=True,  # Always return the best model
-            gradient_accumulation_steps=2,  # If your batch size is increased, use gradient accumulation
             logging_steps=200,  # Log less frequently
             run_name="Language and Personality",
             warmup_steps=500,
@@ -336,7 +338,6 @@ def train_model(model, tokenizer, file_name):
         pause_callback = PauseTrainingCallback(
             pause_after_steps=500, pause_duration=60
         )
-        
 
     # Initialize Trainer
     trainer = Trainer(

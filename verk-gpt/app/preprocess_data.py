@@ -66,25 +66,43 @@ def load_and_prepare_dataset(dataset_name, tokenizer):
                 # for example, by skipping this example or processing differently.
                 utterances = []
 
-            candidates = example.get("candidates", [])  # Safely get 'candidates' key
+            candidates = example.get(
+                "candidates", []
+            )  # Safely get 'candidates' key
 
             # Return combined text and candidates
             return {"text": " ".join(utterances), "candidates": candidates}
-        elif dataset_name == "rajpurkar/squad":
+        elif dataset_name in ["rajpurkar/squad", "rajpurkar/squad_v2"]:
             return {
-                "text": f"Question: {example['question']} Answer: {example['answer']['text'][0]}"
+                "text": f"Question: {example['question']} Answer: {example['answers']['text'][0]}"
             }
         elif dataset_name == "pfb30/multi_woz_v22":
-            return {"text": " ".join(example["dialogue"])}
+            dialogues = []
+            for i in range(len(example['turns']['turn_id'])):
+                dialogue = ""
+                for j in range(i, len(example['turns']['turn_id'])):
+                    speaker = example['turns']['speaker'][j]
+                    utterance = example['turns']['utterance'][j]
+                    dialogue += f"[Speaker {speaker}] {utterance}\n"
+                dialogues.append(dialogue.strip())
+            # Return dialogues as a dictionary with 'text' as the key
+            # Join the dialogues into a single string to match tokenizer's expected input
+            return {"text": " ".join(dialogues)}
         else:
             raise ValueError(f"Unknown dataset: {dataset_name}")
 
-    dataset = dataset.map(preprocess, remove_columns=dataset.column_names["train"])
     dataset = dataset.map(
-        lambda examples: tokenize_function(examples=examples, tokenizer=tokenizer),
+        preprocess, remove_columns=dataset.column_names["train"]
+    )
+    dataset = dataset.map(
+        lambda examples: tokenize_function(
+            examples=examples, tokenizer=tokenizer
+        ),
         batched=True,
     )
-    dataset.set_format(type="torch", columns=["input_ids", "attention_mask", "labels"])
+    dataset.set_format(
+        type="torch", columns=["input_ids", "attention_mask", "labels"]
+    )
 
     return dataset["train"], (
         dataset["validation"] if "validation" in dataset else None
@@ -159,6 +177,7 @@ def tokenize_function(examples, tokenizer):
         padding="max_length",
         truncation=True,
         max_length=1024,
+        return_tensors="pt",  # Return as pytorch tensors
     )
 
     # Labels are the same as input_ids
