@@ -150,7 +150,7 @@ def scrape_urls(urls, visited_urls, lock):
             paragraphs = soup.find_all(
                 ["p", "h1", "h2", "h3", "h4", "h5", "h6"]
             )
-            content = " ".join(
+            content = "\n".join(
                 [
                     para.get_text().strip()
                     for para in paragraphs
@@ -200,7 +200,7 @@ def extract_text_from_pdf(pdf_content):
             text += page_text
 
     # Remove newlines, carriage returns, and extra spaces
-    text = " ".join(text.split())
+    # text = " ".join(text.split())
     return text
 
 

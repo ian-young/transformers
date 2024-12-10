@@ -38,9 +38,9 @@ from app.tune import (  # Importing the function to start training
 
 from transformers import GPT2LMHeadModel, GPT2Tokenizer
 
-USE_BACKUP = True
-TRAIN_CHAT = True
-V_TRAIN = False
+USE_BACKUP = False
+TRAIN_CHAT = False
+V_TRAIN = True
 MODEL_NAME = "gpt2"
 QUERY = "What is Verkada access control?"
 CHECKPOINT_PATH = "./fine_tuned_verkada_gpt2"
