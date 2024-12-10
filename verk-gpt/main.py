@@ -30,18 +30,20 @@ Usage:
 from os.path import exists
 
 import app
-import app.chat_train as chat_train
 from app.tune import (  # Importing the function to start training
     scrape_and_save,
     train_model,
 )
 
-from transformers import GPT2LMHeadModel, GPT2Tokenizer
+from transformers import (
+    T5ForConditionalGeneration,
+    T5Tokenizer,
+    AutoTokenizer,
+    pipeline,
+)
 
 USE_BACKUP = False
-TRAIN_CHAT = False
 V_TRAIN = True
-MODEL_NAME = "gpt2"
 QUERY = "What is Verkada access control?"
 CHECKPOINT_PATH = "./fine_tuned_verkada_gpt2"
 
@@ -65,66 +67,61 @@ def main():
         if not USE_BACKUP:
             scrape_and_save()
 
-        # Step 2: Load the model and tokenizer (will be used for fine-tuning after training)
-        if exists(CHECKPOINT_PATH):
-            # Load the partially-trained model
-            print(f"Loading model from checkpoint: {CHECKPOINT_PATH}")
-            model = GPT2LMHeadModel.from_pretrained(CHECKPOINT_PATH)
-            tokenizer = GPT2Tokenizer.from_pretrained(CHECKPOINT_PATH)
-        else:
-            # Start training a new model
+        checkpoint_path = "./fine_tuned_verkada_gpt2"
+
+        if exists(checkpoint_path):
             print(
-                f"No checkpoint found. Initializing from base model: {MODEL_NAME}"
+                f"Loading model and tokenizer from checkpoint: {checkpoint_path}"
             )
-            model = GPT2LMHeadModel.from_pretrained(MODEL_NAME)
-            tokenizer = GPT2Tokenizer.from_pretrained(MODEL_NAME)
-
-        tokenizer.pad_token = tokenizer.eos_token
-
-        # Step 3: Start the training process (this will fine-tune the model)
-        if TRAIN_CHAT:
-            print("Training chat-like behavior and developing personality.")
-
-            # Can use personachat, dailydialog, squad, squad_v2 and/or multi_woz_v22
-            chat_train.fine_tune_chatbot(
-                model, tokenizer, ["pfb30/multi_woz_v22"]
+            qa_model = T5ForConditionalGeneration.from_pretrained(
+                checkpoint_path
             )
-            model = GPT2LMHeadModel.from_pretrained(
-                "./fine_tuned_verkada_gpt2"
-            )
-            tokenizer = GPT2Tokenizer.from_pretrained(
-                "./fine_tuned_verkada_gpt2"
-            )
+            tokenizer = T5Tokenizer.from_pretrained(checkpoint_path)
         else:
-            print("Skipping chat training.")
+            # Step 2: Load the model and tokenizer (will be used for fine-tuning after training)
+            qa_model_name = "t5-base"
+            print(
+                f"No checkpoint found. Initializing from base model: {qa_model_name}"
+            )
+            qa_model = pipeline("text2text-generation", model=qa_model_name)
+            tokenizer = AutoTokenizer.from_pretrained(qa_model_name)
+
+        file_name = (
+            "verkada_data_backup.txt" if USE_BACKUP else "verkada_data.txt"
+        )
+
+        context_encoder, question_encoder = app.create_retriever()
+        tokenizer.pad_token = tokenizer.eos_token
 
         if V_TRAIN:
             print("Training on Verkada.")
-            train_model(
-                model,
+            model, chunks = train_model(
+                qa_model,
                 tokenizer,
-                (
-                    "verkada_data_backup.txt"
-                    if USE_BACKUP
-                    else "verkada_data.txt"
-                ),
+                file_name,
             )
         else:
             print("Skipping product training")
+            model = qa_model
+            chunks = []
 
-            # Step 4: After training, load the fine-tuned model
-            model = GPT2LMHeadModel.from_pretrained(
-                "./fine_tuned_verkada_gpt2"
-            )
-            tokenizer = GPT2Tokenizer.from_pretrained(
-                "./fine_tuned_verkada_gpt2"
-            )
+        # Step 4: Index the chunks for retrieveal (if needed for inference)
+        chunk_embeddings = app.embed_chunks(chunks, context_encoder, tokenizer)
 
-        # Step 5: Test the fine-tuned model using the custom query
-        response = app.test_gpt2_query(
-            model, tokenizer, QUERY
-        )  # Use the fine-tuned model and tokenizer
-        print(f"Response: {response}")
+        # Step 5: Querying example (for inference using retriever and QA model)
+        relevant_chunks = app.retrieve(
+            QUERY,
+            chunk_embeddings,
+            question_encoder,
+            context_encoder,
+            tokenizer,
+        )
+
+        context = relevant_chunks[
+            0
+        ]  # Chose the most relevant chunk (for simplicity)
+        answer = model(question=QUERY, context=context)
+        print(f"Response: {answer}")
     except KeyboardInterrupt:
         print("Exiting...")
 

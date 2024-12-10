@@ -23,90 +23,70 @@ Usage:
     machine learning models.
 """
 
-from datasets import load_dataset
+from datasets import Dataset
+from tqdm import tqdm
+from sklearn.model_selection import train_test_split
 
 
-def load_and_prepare_dataset(dataset_name, tokenizer):
+def generate_squad_format(chunks, qa_model, look_back=1, look_ahead=1):
     """
-    Loads and prepares a dataset for training by preprocessing its examples.
-
-    This function retrieves a specified dataset and applies preprocessing
-    steps based on the dataset type. It formats the examples into a
-    suitable structure for training, tokenizes the text, and sets the
-    dataset format for use with PyTorch.
+    Generates a SQuAD-like QA dataset from document chunks.
 
     Args:
-        dataset_name (list): The list of names of the datasets to load and prepare.
-        tokenizer (PreTrainedTokenizer): The tokenizer associated with
-            the model.
+        chunks (list): List of document text chunks.
+        qa_model (PreTrainedModel): Pre-trained QA model for generating questions/answers.
+        look_back (int): Number of chunks to include before the current one as context.
+        look_ahead (int): Number of chunks to include after the current one as context.
 
     Returns:
-        tuple: A tuple containing the training dataset and the validation
-            dataset (if available).
-
-    Raises:
-        ValueError: If the dataset name is unknown or unsupported.
-
-    Examples:
-        train_dataset, validation_dataset = load_and_prepare_dataset("squad")
+        list: List of dictionaries in SQuAD format.
     """
-    dataset = load_dataset(dataset_name)
 
-    def preprocess(example):
-        if dataset_name == "roskoN/dailydialog":
-            return {"text": " ".join(example["utterances"])}
-        elif dataset_name == "AlekseyKorshuk/persona-chat":
-            if "history" in example:
-                utterances = [
-                    utter["text"] if isinstance(utter, dict) else str(utter)
-                    for utter in example["history"]
-                ]
-            else:
-                # If 'history' is missing, you can handle this case differently,
-                # for example, by skipping this example or processing differently.
-                utterances = []
+    squad_data = []
 
-            candidates = example.get(
-                "candidates", []
-            )  # Safely get 'candidates' key
+    for i, chunk in enumerate(chunks):
+        # Context with look-back/look-ahead chunks
+        context = (
+            "".join(chunks[max(0, i - look_back) : i])
+            + chunk
+            + "".join(chunks[i + 1 : i + 1 + look_ahead])
+        )
 
-            # Return combined text and candidates
-            return {"text": " ".join(utterances), "candidates": candidates}
-        elif dataset_name in ["rajpurkar/squad", "rajpurkar/squad_v2"]:
-            return {
-                "text": f"Question: {example['question']} Answer: {example['answers']['text'][0]}"
-            }
-        elif dataset_name == "pfb30/multi_woz_v22":
-            dialogues = []
-            for i in range(len(example['turns']['turn_id'])):
-                dialogue = ""
-                for j in range(i, len(example['turns']['turn_id'])):
-                    speaker = example['turns']['speaker'][j]
-                    utterance = example['turns']['utterance'][j]
-                    dialogue += f"[Speaker {speaker}] {utterance}\n"
-                dialogues.append(dialogue.strip())
-            # Return dialogues as a dictionary with 'text' as the key
-            # Join the dialogues into a single string to match tokenizer's expected input
-            return {"text": " ".join(dialogues)}
-        else:
-            raise ValueError(f"Unknown dataset: {dataset_name}")
+        # Generate questions and answers
+        qa_prompt = f"Generate questions and answers for: {context}"
+        qa_outputs = qa_model(
+            qa_prompt, max_length=512, num_return_sequences=5
+        )
 
-    dataset = dataset.map(
-        preprocess, remove_columns=dataset.column_names["train"]
-    )
-    dataset = dataset.map(
-        lambda examples: tokenize_function(
-            examples=examples, tokenizer=tokenizer
-        ),
-        batched=True,
-    )
-    dataset.set_format(
-        type="torch", columns=["input_ids", "attention_mask", "labels"]
-    )
+        for output in qa_outputs:
+            # Validate and parse generated text
+            generated_text = output["generated_text"]
+            if "? Answer:" in generated_text:
+                question, answer = generated_text.split(
+                    "? Answer: ", maxsplit=1
+                )
+                squad_data.append(
+                    {
+                        "context": context,
+                        "question": f"{question.strip()}?",
+                        "answer": answer.strip(),
+                    }
+                )
 
-    return dataset["train"], (
-        dataset["validation"] if "validation" in dataset else None
-    )
+    return squad_data
+
+
+def prepare_squad_dataset(squad_data):
+    """
+    Converts SQuAD data into a Hugging Face Dataset object.
+
+    Args:
+        squad_data (list): List of SQuAD-like dictionaries.
+
+    Returns:
+        Dataset: Hugging Face Dataset.
+    """
+    return Dataset.from_list(squad_data)
 
 
 # Function to split the text into chunks of max_length
@@ -149,37 +129,43 @@ def chunk_text(text, tokenizer, max_size=1024):
     return chunks
 
 
-# Tokenize the dataset (GPT-2 requires text to be tokenized)
-def tokenize_function(examples, tokenizer):
+def preprocess_custom_data(file_name, tokenizer, qa_model):
     """
-    Tokenizes input text examples and prepares them for model training.
+    Preprocesses custom text data for question-answering model training.
 
-    This function takes a dictionary of examples, tokenizes the text, and
-    ensures that the resulting token sequences are properly padded and
-    truncated to a maximum length. It also creates labels that are identical
-    to the input token IDs, making it suitable for supervised learning tasks.
+    This function loads text data from a file, splits it into documents,
+    and prepares it for training a QA model.
 
     Args:
-        examples (dict): A dictionary containing the text examples to be tokenized.
-        tokenizer (PreTrainedTokenizer): The tokenizer associated with
-            the model.
+        file_name (str): Path to the text file containing the dataset.
+        tokenizer: Tokenizer used to process text into tokens.
+        qa_model: Question-answering model used for generating training
+            data.
 
     Returns:
-        dict: A dictionary containing the tokenized inputs and labels.
+        A processed dataset ready for model training.
 
     Examples:
-        tokenized_inputs = tokenize_function(
-            {"text": "Sample text for tokenization."}
-        )
+        dataset = preprocess_custom_data('data.txt', tokenizer, qa_model)
     """
-    inputs = tokenizer(
-        examples["text"],
-        padding="max_length",
-        truncation=True,
-        max_length=1024,
-        return_tensors="pt",  # Return as pytorch tensors
-    )
+    # Load the scraped data
+    with open(file_name, "r", encoding="utf-8") as file:
+        text_data = file.read()
 
-    # Labels are the same as input_ids
-    inputs["labels"] = inputs["input_ids"].copy()
-    return inputs
+    # Split and chunk the text
+    documents = text_data.split("\n\n")
+    chunked_docs = []
+    print("Chunking large documents...")
+    for doc in tqdm(
+        documents, total=len(documents), desc="Processing documents"
+    ):
+        chunked_docs.extend(chunk_text(doc, tokenizer=tokenizer))
+
+    # Generate SQuAD-like data
+    squad_data = generate_squad_format(chunked_docs, qa_model, tokenizer)
+    train_data, val_data = train_test_split(
+        squad_data, test_size=0.2, random_state=42
+    )
+    train_dataset = prepare_squad_dataset(train_data)
+    val_dataset = prepare_squad_dataset(val_data)
+    return {"train": train_dataset, "validation": val_dataset}, chunked_docs

@@ -1,1 +1,1 @@
-from .gptmodel import test_gpt2_query
+from .retriever import create_retriever, retrieve, embed_chunks
