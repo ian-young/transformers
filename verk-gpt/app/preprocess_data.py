@@ -44,7 +44,9 @@ def generate_squad_format(chunks, qa_model, look_back=1, look_ahead=1):
 
     squad_data = []
 
-    for i, chunk in enumerate(chunks):
+    for i, chunk in tqdm(
+        enumerate(chunks), total=len(chunks), desc="splitting context"
+    ):
         # Context with look-back/look-ahead chunks
         context = (
             "".join(chunks[max(0, i - look_back) : i])
@@ -55,7 +57,10 @@ def generate_squad_format(chunks, qa_model, look_back=1, look_ahead=1):
         # Generate questions and answers
         qa_prompt = f"Generate questions and answers for: {context}"
         qa_outputs = qa_model(
-            qa_prompt, max_length=512, num_return_sequences=5
+            qa_prompt,
+            max_length=512,
+            num_return_sequences=5,
+            num_beams=5,  # Enable beam search to support multiple sequences
         )
 
         for output in qa_outputs:
@@ -162,10 +167,13 @@ def preprocess_custom_data(file_name, tokenizer, qa_model):
         chunked_docs.extend(chunk_text(doc, tokenizer=tokenizer))
 
     # Generate SQuAD-like data
-    squad_data = generate_squad_format(chunked_docs, qa_model, tokenizer)
+    print("Generating SQuAD data")
+    squad_data = generate_squad_format(chunked_docs, qa_model)
+    print("Splitting training and testing data")
     train_data, val_data = train_test_split(
         squad_data, test_size=0.2, random_state=42
     )
+    print("Preparing dataset")
     train_dataset = prepare_squad_dataset(train_data)
     val_dataset = prepare_squad_dataset(val_data)
     return {"train": train_dataset, "validation": val_dataset}, chunked_docs

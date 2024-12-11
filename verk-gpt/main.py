@@ -33,6 +33,7 @@ import app
 from app.tune import (  # Importing the function to start training
     scrape_and_save,
     train_model,
+    set_torch_device,
 )
 
 from transformers import (
@@ -42,7 +43,7 @@ from transformers import (
     pipeline,
 )
 
-USE_BACKUP = False
+USE_BACKUP = True
 V_TRAIN = True
 QUERY = "What is Verkada access control?"
 CHECKPOINT_PATH = "./fine_tuned_verkada_gpt2"
@@ -83,7 +84,10 @@ def main():
             print(
                 f"No checkpoint found. Initializing from base model: {qa_model_name}"
             )
-            qa_model = pipeline("text2text-generation", model=qa_model_name)
+            _, device = set_torch_device(None)
+            qa_model = pipeline(
+                "text2text-generation", model=qa_model_name, device=device
+            )
             tokenizer = AutoTokenizer.from_pretrained(qa_model_name)
 
         file_name = (

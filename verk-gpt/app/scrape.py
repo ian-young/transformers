@@ -243,13 +243,17 @@ def scrape_links(url, soup, urls, visited_urls, lock):
             full_url = f"{url}{href}" if href.startswith("/") else href
 
             # Check if the URL contains "verkada"
-            if not re.search(r"verkada", full_url, re.IGNORECASE) or any(
-                domain in full_url
-                for domain in [
-                    "linkdin.com",
-                    "github.com",
-                    "verkada.intercom-attachements-7.com",
-                ]
+            if (
+                not re.search(r"verkada", full_url, re.IGNORECASE)
+                or any(
+                    domain in full_url
+                    for domain in [
+                        "linkdin.com",
+                        "github.com",
+                        "verkada.intercom-attachements-7.com",
+                    ]
+                )
+                or re.search(r"verkada.com/ja", full_url, re.IGNORECASE)
             ):
                 continue  # Skip the URL if it does not
 

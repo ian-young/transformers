@@ -58,16 +58,12 @@ def set_torch_device(model):
     """
     # Check if MPS is available on Apple Silicon
     if torch.backends.mps.is_available():
-        device = torch.device("mps")
         device_name = "mps"
     elif torch.cuda.is_available():
-        device = torch.device("cuda")
         device_name = "cuda"
     else:
-        device = torch.device("cpu")
         device_name = "cpu"
 
-    model.to(device)  # Move model to GPU, MPS, or CPU
     return model, device_name
 
 
