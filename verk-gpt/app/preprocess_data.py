@@ -23,62 +23,91 @@ Usage:
     machine learning models.
 """
 
+import json
+import os
+
 from datasets import Dataset
-from tqdm import tqdm
 from sklearn.model_selection import train_test_split
+from tqdm import tqdm
 
 
-def generate_squad_format(chunks, qa_model, look_back=1, look_ahead=1):
+def generate_squad_format_with_checkpoint(
+    chunks, qa_model, tokenizer, look_back=1, look_ahead=1
+):
     """
-    Generates a SQuAD-like QA dataset from document chunks.
+    Generates SQuAD-format data with checkpointing.
 
-    Args:
-        chunks (list): List of document text chunks.
-        qa_model (PreTrainedModel): Pre-trained QA model for generating questions/answers.
-        look_back (int): Number of chunks to include before the current one as context.
-        look_ahead (int): Number of chunks to include after the current one as context.
-
-    Returns:
-        list: List of dictionaries in SQuAD format.
+    Parameters:
+        chunks (list): Context chunks to process.
+        qa_model: Pretrained question-answer generation model.
+        tokenizer: Tokenizer corresponding to qa_model.
+        look_back (int): Number of chunks to include as context look-back.
+        look_ahead (int): Number of chunks to include as context look-ahead.
     """
+    checkpoint_file = "squad_data.txt"
+    processed_indices = set()
 
-    squad_data = []
+    # Load previously processed indices to resume from the last checkpoint
+    if os.path.exists(checkpoint_file):
+        with open(checkpoint_file, "r", encoding="UTF-8") as file:
+            for line in file:
+                data = json.loads(line.strip())
+                processed_indices.add(data["index"])
 
-    for i, chunk in tqdm(
-        enumerate(chunks), total=len(chunks), desc="splitting context"
-    ):
-        # Context with look-back/look-ahead chunks
-        context = (
-            "".join(chunks[max(0, i - look_back) : i])
-            + chunk
-            + "".join(chunks[i + 1 : i + 1 + look_ahead])
-        )
+    with open(checkpoint_file, "a", encoding="UTF-8") as file:
+        for i, chunk in tqdm(
+            enumerate(chunks), total=len(chunks), desc="Processing chunks"
+        ):
+            if i in processed_indices:
+                continue  # Skip already processed indices
 
-        # Generate questions and answers
-        qa_prompt = f"Generate questions and answers for: {context}"
-        qa_outputs = qa_model(
-            qa_prompt,
-            max_length=512,
-            num_return_sequences=5,
-            num_beams=5,  # Enable beam search to support multiple sequences
-        )
+            # Context with look-back and look-ahead
+            context = (
+                "".join(chunks[max(0, i - look_back) : i])
+                + chunk
+                + "".join(chunks[i + 1 : i + 1 + look_ahead])
+            )
 
-        for output in qa_outputs:
-            # Validate and parse generated text
-            generated_text = output["generated_text"]
-            if "? Answer:" in generated_text:
-                question, answer = generated_text.split(
-                    "? Answer: ", maxsplit=1
+            # Tokenize input
+            inputs = tokenizer(context, return_tensors="pt")
+
+            try:
+                # Generate question-answer pair
+                outputs = qa_model.generate(**inputs, max_length=100)
+                qa_text = tokenizer.decode(
+                    outputs[0], skip_special_tokens=False
                 )
-                squad_data.append(
-                    {
+                qa_text = qa_text.replace(tokenizer.pad_token, "").replace(
+                    tokenizer.eos_token, ""
+                )
+
+                # Split into question and answer
+                if tokenizer.sep_token in qa_text:
+                    question, answer = qa_text.split(
+                        tokenizer.sep_token, maxsplit=1
+                    )
+                    # Write to file in SQuAD format
+                    squad_entry = {
+                        "index": i,
                         "context": context,
-                        "question": f"{question.strip()}?",
+                        "question": question.strip(),
                         "answer": answer.strip(),
                     }
+                    file.write(json.dumps(squad_entry) + "\n")
+                else:
+                    print(
+                        f"Skipping chunk {i}: Failed to generate valid Q&A format."
+                    )
+            except ValueError as e:
+                print(f"ValueError processing chunk {i}: {e}")
+            except KeyError as e:
+                print(
+                    f"KeyError processing chunk {i}: Missing key in output - {e}"
                 )
-
-    return squad_data
+            except IndexError as e:
+                print(
+                    f"IndexError processing chunk {i}: Index out of range - {e}"
+                )
 
 
 def prepare_squad_dataset(squad_data):
@@ -167,9 +196,15 @@ def preprocess_custom_data(file_name, tokenizer, qa_model):
         chunked_docs.extend(chunk_text(doc, tokenizer=tokenizer))
 
     # Generate SQuAD-like data
-    print("Generating SQuAD data")
-    squad_data = generate_squad_format(chunked_docs, qa_model)
+    generate_squad_format_with_checkpoint(
+        chunks=chunked_docs, qa_model=qa_model, tokenizer=tokenizer
+    )
+
     print("Splitting training and testing data")
+    squad_data = None
+    with open("squad_data.txt", "r", encoding="UTF-8") as file:
+        squad_data = file.read()
+
     train_data, val_data = train_test_split(
         squad_data, test_size=0.2, random_state=42
     )

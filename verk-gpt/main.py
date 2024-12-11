@@ -80,7 +80,7 @@ def main():
             tokenizer = T5Tokenizer.from_pretrained(checkpoint_path)
         else:
             # Step 2: Load the model and tokenizer (will be used for fine-tuning after training)
-            qa_model_name = "t5-base"
+            qa_model_name = "potsawee/t5-large-generation-squad-QuestionAnswer"
             print(
                 f"No checkpoint found. Initializing from base model: {qa_model_name}"
             )
