@@ -44,7 +44,7 @@ def generate_squad_format_with_checkpoint(
         look_back (int): Number of chunks to include as context look-back.
         look_ahead (int): Number of chunks to include as context look-ahead.
     """
-    checkpoint_file = "squad_data.txt"
+    checkpoint_file = "squad_data.json"
     processed_indices = set()
 
     # Load previously processed indices to resume from the last checkpoint
