@@ -64,6 +64,9 @@ def set_torch_device(model):
     else:
         device_name = "cpu"
 
+    if model:
+        model.to(device_name)
+
     return model, device_name
 
 
@@ -167,11 +170,13 @@ def train_model(model, tokenizer, file_name):
     Examples:
         train_model(my_model, my_tokenizer, "data.txt")
     """
-    model, device = set_torch_device(model=model)
+    model, device_name = set_torch_device(model=model)
 
-    squad_dataset, chunks = preprocess_custom_data(file_name, tokenizer, model)
+    squad_dataset, chunks = preprocess_custom_data(
+        file_name, tokenizer, model, device_name
+    )
 
-    if device == "cuda":
+    if device_name == "cuda":
         # Define training arguments
         training_args = TrainingArguments(
             output_dir="./results",  # Output directory for model checkpoints
@@ -228,7 +233,7 @@ def train_model(model, tokenizer, file_name):
     )
 
     # Fine-tune the model
-    print(f"Starting training on {device}...")
+    print(f"Starting training on {device_name}...")
     trainer.train()
 
     # Save the fine-tuned model

@@ -33,14 +33,11 @@ import app
 from app.tune import (  # Importing the function to start training
     scrape_and_save,
     train_model,
-    set_torch_device,
 )
 
 from transformers import (
-    T5ForConditionalGeneration,
-    T5Tokenizer,
+    AutoModelForSeq2SeqLM,
     AutoTokenizer,
-    pipeline,
 )
 
 USE_BACKUP = True
@@ -74,20 +71,15 @@ def main():
             print(
                 f"Loading model and tokenizer from checkpoint: {checkpoint_path}"
             )
-            qa_model = T5ForConditionalGeneration.from_pretrained(
-                checkpoint_path
-            )
-            tokenizer = T5Tokenizer.from_pretrained(checkpoint_path)
+            qa_model = AutoModelForSeq2SeqLM.from_pretrained(checkpoint_path)
+            tokenizer = AutoTokenizer.from_pretrained(checkpoint_path)
         else:
             # Step 2: Load the model and tokenizer (will be used for fine-tuning after training)
             qa_model_name = "potsawee/t5-large-generation-squad-QuestionAnswer"
             print(
                 f"No checkpoint found. Initializing from base model: {qa_model_name}"
             )
-            _, device = set_torch_device(None)
-            qa_model = pipeline(
-                "text2text-generation", model=qa_model_name, device=device
-            )
+            qa_model = AutoModelForSeq2SeqLM.from_pretrained(qa_model_name)
             tokenizer = AutoTokenizer.from_pretrained(qa_model_name)
 
         file_name = (

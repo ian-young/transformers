@@ -24,37 +24,65 @@ Usage:
 """
 
 import json
-import os
+from os.path import exists
 
 from datasets import Dataset
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 
+CHECKPOINT_FILE = "squad_data.json"
+
 
 def generate_squad_format_with_checkpoint(
-    chunks, qa_model, tokenizer, look_back=1, look_ahead=1
+    chunks,
+    qa_model,
+    tokenizer,
+    device_name,
+    look_back=1,
+    look_ahead=1,
+    checkpoint_file=CHECKPOINT_FILE,
 ):
-    """
-    Generates SQuAD-format data with checkpointing.
+    """Generates SQuAD-formatted question-answer pairs from text chunks
+    with checkpoint resuming capability.
 
-    Parameters:
-        chunks (list): Context chunks to process.
-        qa_model: Pretrained question-answer generation model.
-        tokenizer: Tokenizer corresponding to qa_model.
-        look_back (int): Number of chunks to include as context look-back.
-        look_ahead (int): Number of chunks to include as context look-ahead.
+    This function processes text chunks to generate question-answer pairs
+    using a QA model. It supports resuming processing from a previous
+    checkpoint and allows context windowing through look-back and look-ahead
+    parameters.
+
+    Args:
+        chunks (list): A list of text chunks to process.
+        qa_model (PreTrainedModel): The question-answering model used to
+            generate Q&A pairs.
+        tokenizer (PreTrainedTokenizer): The tokenizer associated with
+            the QA model.
+        device_name (str): The device (e.g., 'cuda', 'cpu') to run the
+            model on.
+        look_back (int, optional): Number of chunks to include before the
+            current chunk. Defaults to 1.
+        look_ahead (int, optional): Number of chunks to include after the
+            current chunk. Defaults to 1.
+        checkpoint_file (str, optional): Path to the checkpoint file for
+            resuming processing.
+
+    Returns:
+        None: Writes SQuAD-formatted Q&A pairs to the checkpoint file.
+
+    Raises:
+        ValueError: If there are issues processing a chunk.
+        KeyError: If there are missing keys in the model output.
+        IndexError: If there are indexing issues during processing.
     """
-    checkpoint_file = "squad_data.json"
     processed_indices = set()
 
     # Load previously processed indices to resume from the last checkpoint
-    if os.path.exists(checkpoint_file):
-        with open(checkpoint_file, "r", encoding="UTF-8") as file:
+    if exists(checkpoint_file):
+        with open(checkpoint_file, "r", encoding="utf-8") as file:
             for line in file:
                 data = json.loads(line.strip())
                 processed_indices.add(data["index"])
 
-    with open(checkpoint_file, "a", encoding="UTF-8") as file:
+    with open(checkpoint_file, "a", encoding="utf-8") as file:
         for i, chunk in tqdm(
             enumerate(chunks), total=len(chunks), desc="Processing chunks"
         ):
@@ -69,14 +97,17 @@ def generate_squad_format_with_checkpoint(
             )
 
             # Tokenize input
-            inputs = tokenizer(context, return_tensors="pt")
+            inputs = tokenizer(context, return_tensors="pt").to(device_name)
 
             try:
-                # Generate question-answer pair
-                outputs = qa_model.generate(**inputs, max_length=100)
+                # Generate question-answer pair using the pipeline
+                outputs = qa_model.generate(
+                    **inputs, max_length=100
+                )  # Generate with the model directly
                 qa_text = tokenizer.decode(
                     outputs[0], skip_special_tokens=False
                 )
+
                 qa_text = qa_text.replace(tokenizer.pad_token, "").replace(
                     tokenizer.eos_token, ""
                 )
@@ -86,6 +117,7 @@ def generate_squad_format_with_checkpoint(
                     question, answer = qa_text.split(
                         tokenizer.sep_token, maxsplit=1
                     )
+
                     # Write to file in SQuAD format
                     squad_entry = {
                         "index": i,
@@ -163,7 +195,7 @@ def chunk_text(text, tokenizer, max_size=1024):
     return chunks
 
 
-def preprocess_custom_data(file_name, tokenizer, qa_model):
+def preprocess_custom_data(file_name, tokenizer, qa_model, device_name):
     """
     Preprocesses custom text data for question-answering model training.
 
@@ -173,8 +205,9 @@ def preprocess_custom_data(file_name, tokenizer, qa_model):
     Args:
         file_name (str): Path to the text file containing the dataset.
         tokenizer: Tokenizer used to process text into tokens.
-        qa_model: Question-answering model used for generating training
+        qa_model (PreTrainedModel): Question-answering model used for generating training
             data.
+        device_name: The name of the primary compute device
 
     Returns:
         A processed dataset ready for model training.
@@ -197,7 +230,10 @@ def preprocess_custom_data(file_name, tokenizer, qa_model):
 
     # Generate SQuAD-like data
     generate_squad_format_with_checkpoint(
-        chunks=chunked_docs, qa_model=qa_model, tokenizer=tokenizer
+        chunks=chunked_docs,
+        qa_model=qa_model,
+        tokenizer=tokenizer,
+        device_name=device_name,
     )
 
     print("Splitting training and testing data")
