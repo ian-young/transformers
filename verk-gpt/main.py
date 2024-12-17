@@ -86,7 +86,8 @@ def main():
             "verkada_data_backup.txt" if USE_BACKUP else "verkada_data.txt"
         )
 
-        context_encoder, question_encoder = app.create_retriever()
+        _, device = app.set_torch_device()
+        context_encoder, question_encoder = app.create_retriever(device=device)
         tokenizer.pad_token = tokenizer.eos_token
 
         if V_TRAIN:
@@ -102,15 +103,21 @@ def main():
             chunks = []
 
         # Step 4: Index the chunks for retrieveal (if needed for inference)
-        chunk_embeddings = app.embed_chunks(chunks, context_encoder, tokenizer)
+        chunk_embeddings = app.embed_chunks(
+            chunks=chunks,
+            context_encoder=context_encoder,
+            tokenizer=tokenizer,
+            device=device,
+        )
 
         # Step 5: Querying example (for inference using retriever and QA model)
         relevant_chunks = app.retrieve(
-            QUERY,
-            chunk_embeddings,
-            question_encoder,
-            context_encoder,
-            tokenizer,
+            query=QUERY,
+            chunks=chunk_embeddings,
+            question_encoder=question_encoder,
+            context_encoder=context_encoder,
+            tokenizer=tokenizer,
+            device=device,
         )
 
         context = relevant_chunks[

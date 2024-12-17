@@ -29,14 +29,15 @@ Usage:
 """
 
 # pylint: disable=redefined-outer-name
-
 from os import cpu_count
 from threading import Lock
 from time import sleep
 
 import app.scrape as scrape  # Importing the scrape functionality
-from app.preprocess_data import preprocess_custom_data
+
+import evaluate
 import torch
+from app.preprocess_data import preprocess_custom_data
 
 from transformers import (
     Trainer,
@@ -45,16 +46,16 @@ from transformers import (
 )
 
 
-def set_torch_device(model):
+def set_torch_device(model=None):
     """Sets the appropriate device for the model based on the available
     hardware.
 
     Args:
-        model: The model to be set on the appropriate device.
+        model (optional): The model to be set on the appropriate device.
 
     Returns:
         model: The model with the device set.
-        device: The device being used (GPU, CPU, or MPS).
+        device (str): The device being used (GPU, CPU, or MPS).
     """
     # Check if MPS is available on Apple Silicon
     if torch.backends.mps.is_available():
@@ -149,6 +150,44 @@ def scrape_and_save():
     print("Scraping complete, data saved to verkada_data.txt.")
 
 
+def compute_metrics(p, tokenizer):
+    """
+    Computes the Exact Match (EM) and F1 score for the model predictions.
+
+    Args:
+        p: Tuple containing the predictions and labels
+            p.predictions (numpy array): Model's predicted token IDs
+            p.label_ids (numpy array): Ground truth token IDs
+        tokenizer (PreTrainedTokenizer): The tokenizer associated with
+            the model.
+
+    Returns:
+        dict: Dictionary containing the EM and F1 scores
+    """
+    # initialize_metrics
+    exact_match = evaluate.load("exact_match")
+    f1 = evaluate.load("f1")
+
+    preds = p.predictions
+    labels = p.label_ids
+
+    # Decode the predicted and label token IDs to text
+    decoded_preds = tokenizer.batch_decode(preds, skip_special_tokens=True)
+    decoded_labels = tokenizer.batch_decode(labels, skip_special_tokens=True)
+
+    # Strip leading/trailing whitespaces from the predictions and labels
+    decoded_preds = [pred.strip() for pred in decoded_preds]
+    decoded_labels = [label.strip() for label in decoded_labels]
+
+    # Compute Exact Match (EM) and F1 score
+    em_score = exact_match.compute(
+        predictions=decoded_preds, references=decoded_labels
+    )
+    f1_score = f1.compute(predictions=decoded_preds, references=decoded_labels)
+
+    return {"exact_match": em_score["exact_match"], "f1": f1_score["f1"]}
+
+
 def train_model(model, tokenizer, file_name):
     """
     Trains a model using text data from a specified file.
@@ -222,12 +261,16 @@ def train_model(model, tokenizer, file_name):
             pause_after_steps=500, pause_duration=60
         )
 
+    train_dataset = squad_dataset["train"]
+    validation_dataset = squad_dataset["validation"]
+
     # Initialize Trainer
     trainer = Trainer(
         model=model,
         args=training_args,
-        train_dataset=squad_dataset["train"],
-        eval_dataset=squad_dataset["validation"],
+        compute_metrics=compute_metrics,
+        train_dataset=train_dataset,
+        eval_dataset=validation_dataset,
         tokenizer=tokenizer,
         callbacks=[pause_callback],  # pause to allow cool down period
     )
