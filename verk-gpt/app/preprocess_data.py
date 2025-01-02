@@ -23,16 +23,21 @@ Usage:
     machine learning models.
 """
 
+import logging
 import json
 import uuid
 from multiprocessing import Pool, cpu_count
 from os.path import exists
+from re import sub
 
 from datasets import Dataset
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 
 CHECKPOINT_FILE = "squad_data.json"
+
+# Suppress transformers warnings
+logging.getLogger("transformers").setLevel(logging.ERROR)
 
 
 def generate_squad_format_with_checkpoint(
@@ -42,7 +47,7 @@ def generate_squad_format_with_checkpoint(
     device_name,
     look_back=1,
     checkpoint_file=CHECKPOINT_FILE,
-    batch_size=100,
+    batch_size=50,
 ):
     """Generates SQuAD-formatted question-answer pairs from text chunks
     with checkpoint resuming capability.
@@ -75,9 +80,9 @@ def generate_squad_format_with_checkpoint(
         IndexError: If there are indexing issues during processing.
     """
     processed_indices = set()
-
     # Load previously processed indices to resume from the last checkpoint
     if exists(checkpoint_file):
+        print("Resuming from SQuAD checkpoint...")
         with open(checkpoint_file, "r", encoding="utf-8") as file:
             for line in file:
                 data = json.loads(line.strip())
@@ -85,14 +90,26 @@ def generate_squad_format_with_checkpoint(
 
     batch_entries = []
 
-    for i, chunk in tqdm(
-        enumerate(chunks), total=len(chunks), desc="Processing chunks"
-    ):
+    progress_bar = tqdm(
+        total=len(chunks),
+        desc="Processing chunks",
+        initial=len(processed_indices),
+        unit="chunk",
+        colour="cyan",
+        dynamic_ncols=True,
+        smoothing=0.5,
+    )
+    for i, chunk in enumerate(chunks):
         if i in processed_indices:
             continue  # Skip already processed indices
 
         # Context with look-back
-        context = "".join(chunks[max(0, i - look_back) : i]) + chunk["data"]
+        context = (
+            "".join(
+                [chunk["data"] for chunk in chunks[max(0, i - look_back) : i]]
+            )
+            + chunk["data"]
+        )
 
         # Tokenize input
         inputs = tokenizer(context, return_tensors="pt", truncation=True).to(
@@ -104,21 +121,32 @@ def generate_squad_format_with_checkpoint(
             outputs = qa_model.generate(
                 **inputs, max_length=100
             )  # Generate with the model directly
-            qa_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
+            qa_text = tokenizer.decode(outputs[0], skip_special_tokens=False)
 
             qa_text = qa_text.replace(tokenizer.pad_token, "").replace(
                 tokenizer.eos_token, ""
             )
+            # Remove padding tokens at the start of questions
+            qa_text = sub(r"<pad>\s*", "", qa_text)
 
             # Split into question and answer
             if tokenizer.sep_token in qa_text:
+
                 question, answer = qa_text.split(
                     tokenizer.sep_token, maxsplit=1
                 )
 
                 answer_start = context.find(answer.strip())
                 if answer_start == -1:
-                    print(f"Skipping chunk {i}: Answer not found in context.")
+                    progress_bar.write(
+                        f"Skipping chunk {i}: Answer not found in context."
+                    )
+                    continue
+
+                if answer == "Verkada":
+                    progress_bar.write(
+                        f"Skipping chunk {i}: Answer is too simple."
+                    )
                     continue
 
                 # Write to file in SQuAD format
@@ -152,13 +180,16 @@ def generate_squad_format_with_checkpoint(
                     batch_entries = []  # Reset the batch
 
             else:
-                print(
+                progress_bar.write(
                     f"Skipping chunk {i}: Failed to generate valid Q&A format."
                 )
+
+            progress_bar.update(1)
 
         except (ValueError, KeyError, IndexError) as e:
             print(f"Error processing chunk {i}: {e}")
 
+    progress_bar.close()
     if batch_entries:
         with open(checkpoint_file, "a", encoding="utf-8") as file:
             for entry in batch_entries:
@@ -202,16 +233,33 @@ def chunk_text(data, tokenizer, max_size=512, overlap=50):
     Examples:
         chunks = chunk_text("Your long text here...", max_size=512)
     """
-    tokens = tokenizer.encode(data["text"], add_special_tokens=True)
     chunks = []
 
-    # Handle chunking with overlap
-    for i in range(0, len(tokens), max_size - overlap):
-        part = tokens[i : i + max_size]
+    # Encode the text
+    tokens = tokenizer.encode(data["text"], add_special_tokens=False)
+
+    # Trim if token list exceeds max_size
+    while len(tokens) > max_size:
+        part = tokens[:max_size]  # Grab a slice that fits the limit
+
         chunks.append(
             {
                 "url": data["url"],
-                "data": tokenizer.decode(part, skip_special_token=True),
+                "data": tokenizer.decode(part, skip_special_tokens=True),
+            }
+        )
+
+        # Move forward by max_size - overlap
+        tokens = tokens[max_size - overlap :]
+
+    # Check for any remaining tokens
+    if tokens:
+        chunks.append(
+            {
+                "url": data["url"],
+                "data": tokenizer.decode(
+                    tokens, skip_special_tokens=True
+                ),  # Decode remaining tokens
             }
         )
 
@@ -247,7 +295,9 @@ def preprocess_custom_data(
         text_data = file.read()
 
     # Split and chunk the text
-    documents = text_data.split("\n\n")
+    documents = [
+        json.loads(doc) for doc in text_data.split("\n\n") if doc.strip()
+    ]
     chunked_docs = []
     print("Chunking large documents...")
 
@@ -257,7 +307,6 @@ def preprocess_custom_data(
         )
 
     chunked_docs = [item for sublist in chunked_docs for item in sublist]
-
     if generate_squad:
         # Generate SQuAD-like data
         generate_squad_format_with_checkpoint(
