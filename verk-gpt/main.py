@@ -40,7 +40,7 @@ from transformers import (
     AutoTokenizer,
 )
 
-USE_BACKUP = True
+USE_BACKUP = False
 USE_EXISTING_SQUAD_DATA = False
 V_TRAIN = True
 QUERY = "What is Verkada access control?"
@@ -65,7 +65,7 @@ def main():
         # Step 1: Scrape websites for data
         if not USE_BACKUP:
             scrape_and_save()
-
+            exit(0)
         checkpoint_path = "./fine_tuned_verkada_gpt2"
 
         if exists(checkpoint_path):

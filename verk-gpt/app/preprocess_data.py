@@ -25,7 +25,7 @@ Usage:
 
 import json
 import uuid
-from multiprocessing import Lock, Pool, cpu_count
+from multiprocessing import Pool, cpu_count
 from os.path import exists
 
 from datasets import Dataset
@@ -179,7 +179,7 @@ def prepare_squad_dataset(squad_data):
 
 
 # Function to split the text into chunks of max_length
-def chunk_text(data, tokenizer, lock, max_size=512, overlap=50):
+def chunk_text(data, tokenizer, max_size=512, overlap=50):
     """
     Splits a given text into smaller chunks based on a maximum token size.
 
@@ -192,7 +192,6 @@ def chunk_text(data, tokenizer, lock, max_size=512, overlap=50):
         text (dict): The dictionary with input text to be chunked.
         tokenizer (PreTrainedTokenizer): The tokenizer associated with
             the model.
-        lock (MultiprocessingLock): The thread lock to use for writing.
         max_size (int, optional): The maximum number of tokens allowed in each
             chunk. Defaults to 1024.
         overlap (int, optional): The amount of allowed overlap chunks.
@@ -209,13 +208,12 @@ def chunk_text(data, tokenizer, lock, max_size=512, overlap=50):
     # Handle chunking with overlap
     for i in range(0, len(tokens), max_size - overlap):
         part = tokens[i : i + max_size]
-        with lock:
-            chunks.append(
-                {
-                    "url": data["url"],
-                    "data": tokenizer.decode(part, skip_special_token=True),
-                }
-            )
+        chunks.append(
+            {
+                "url": data["url"],
+                "data": tokenizer.decode(part, skip_special_token=True),
+            }
+        )
 
     return chunks
 
@@ -255,7 +253,7 @@ def preprocess_custom_data(
 
     with Pool(cpu_count()) as pool:
         chunked_docs = pool.starmap(
-            chunk_text, [(doc, tokenizer, Lock()) for doc in documents]
+            chunk_text, [(doc, tokenizer) for doc in documents]
         )
 
     chunked_docs = [item for sublist in chunked_docs for item in sublist]
