@@ -165,7 +165,6 @@ def scrape_urls(urls, visited_urls, lock):
         # Save the scraped data to a file
         with lock:
             with open("verkada_data.txt", "a", encoding="utf-8") as file:
-                print(data_list)
                 file.write(dumps(data_list, ensure_ascii=False) + "\n\n")
 
         with ThreadPoolExecutor(max_workers=cpu_count() * 2) as executor:
@@ -231,7 +230,6 @@ def scrape_links(url, soup, urls, visited_urls, lock):
     Examples:
         scrape_links("http://example.com", soup, urls, visited_urls, lock)
     """
-    print("Hunting for more links")
     # Find all <a> tags with href attribute
     links = soup.find_all("a", href=True)
 
