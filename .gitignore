@@ -3,6 +3,7 @@ fine_tuned_verkada_gpt2
 results
 verkada_data.txt
 squad_data.json
+squad_data_backup.json
 
 # DS Store
 .DS_Store
