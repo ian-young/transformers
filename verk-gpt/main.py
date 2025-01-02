@@ -41,6 +41,7 @@ from transformers import (
 )
 
 USE_BACKUP = True
+USE_EXISTING_SQUAD_DATA = False
 V_TRAIN = True
 QUERY = "What is Verkada access control?"
 CHECKPOINT_PATH = "./fine_tuned_verkada_gpt2"
@@ -96,6 +97,7 @@ def main():
                 qa_model,
                 tokenizer,
                 file_name,
+                USE_EXISTING_SQUAD_DATA,
             )
         else:
             print("Skipping product training")

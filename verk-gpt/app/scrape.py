@@ -142,15 +142,14 @@ def scrape_urls(urls, visited_urls, lock):
 
         if "application/pdf" in response.headers.get("Content-Type", ""):
             print(f"Extracting text from PDF at {url}...")
-            pdf_text = extract_text_from_pdf(response.content)
-            data += pdf_text + "\n\n"
+            data = extract_text_from_pdf(response.content)
         elif "text/html" in response.headers.get("Content-Type", ""):
 
             # Get all paragraphs and headings
             paragraphs = soup.find_all(
                 ["p", "h1", "h2", "h3", "h4", "h5", "h6"]
             )
-            content = "\n".join(
+            data = "\n".join(
                 [
                     para.get_text().strip()
                     for para in paragraphs
@@ -158,14 +157,14 @@ def scrape_urls(urls, visited_urls, lock):
                     not in para.get_text()
                 ]
             )
-            data += content + "\n\n"
         else:
             print(f"Skipping non-HTML content from {url}")
 
+        data_list = [{"url": url, "text": data}]
         # Save the scraped data to a file
         with lock:
             with open("verkada_data.txt", "a", encoding="utf-8") as file:
-                file.write(data)
+                file.write(data_list + "\n\n")
 
         with ThreadPoolExecutor(max_workers=cpu_count() * 2) as executor:
             # Scrape links from this page and add to the list

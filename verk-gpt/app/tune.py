@@ -188,7 +188,7 @@ def compute_metrics(p, tokenizer):
     return {"exact_match": em_score["exact_match"], "f1": f1_score["f1"]}
 
 
-def train_model(model, tokenizer, file_name):
+def train_model(model, tokenizer, file_name, generate_squad):
     """
     Trains a model using text data from a specified file.
 
@@ -202,6 +202,8 @@ def train_model(model, tokenizer, file_name):
         tokenizer (PreTrainedTokenizer): The tokenizer associated with
             the model.
         file_name (str): The path to the file containing the training data.
+        generate_squad (bool): Tells the model whether or not it needs to
+            generate new SQuAD data.
 
     Returns:
         PreTrainedModel: The custom-trained transformer.
@@ -212,7 +214,7 @@ def train_model(model, tokenizer, file_name):
     model, device_name = set_torch_device(model=model)
 
     squad_dataset, chunks = preprocess_custom_data(
-        file_name, tokenizer, model, device_name
+        file_name, tokenizer, model, device_name, generate_squad
     )
 
     if device_name == "cuda":

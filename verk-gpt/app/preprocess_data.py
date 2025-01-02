@@ -24,10 +24,11 @@ Usage:
 """
 
 import json
+import uuid
+from multiprocessing import Lock, Pool, cpu_count
 from os.path import exists
 
 from datasets import Dataset
-from multiprocessing import Pool, cpu_count, Lock
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 
@@ -40,7 +41,6 @@ def generate_squad_format_with_checkpoint(
     tokenizer,
     device_name,
     look_back=1,
-    look_ahead=1,
     checkpoint_file=CHECKPOINT_FILE,
     batch_size=100,
 ):
@@ -53,7 +53,7 @@ def generate_squad_format_with_checkpoint(
     parameters.
 
     Args:
-        chunks (list): A list of text chunks to process.
+        chunks (list): A list of dictionaries with text chunks to process.
         qa_model (PreTrainedModel): The question-answering model used to
             generate Q&A pairs.
         tokenizer (PreTrainedTokenizer): The tokenizer associated with
@@ -61,8 +61,6 @@ def generate_squad_format_with_checkpoint(
         device_name (str): The device (e.g., 'cuda', 'cpu') to run the
             model on.
         look_back (int, optional): Number of chunks to include before the
-            current chunk. Defaults to 1.
-        look_ahead (int, optional): Number of chunks to include after the
             current chunk. Defaults to 1.
         checkpoint_file (str, optional): Path to the checkpoint file for
             resuming processing.
@@ -93,12 +91,8 @@ def generate_squad_format_with_checkpoint(
         if i in processed_indices:
             continue  # Skip already processed indices
 
-        # Context with look-back and look-ahead
-        context = (
-            "".join(chunks[max(0, i - look_back) : i])
-            + chunk
-            + "".join(chunks[i + 1 : i + 1 + look_ahead])
-        )
+        # Context with look-back
+        context = "".join(chunks[max(0, i - look_back) : i]) + chunk["data"]
 
         # Tokenize input
         inputs = tokenizer(context, return_tensors="pt", truncation=True).to(
@@ -122,12 +116,32 @@ def generate_squad_format_with_checkpoint(
                     tokenizer.sep_token, maxsplit=1
                 )
 
+                answer_start = context.find(answer.strip())
+                if answer_start == -1:
+                    print(f"Skipping chunk {i}: Answer not found in context.")
+                    continue
+
                 # Write to file in SQuAD format
                 squad_entry = {
+                    "title": chunk["url"],  # Placeholder title
+                    "paragraphs": [
+                        {
+                            "context": context,
+                            "qas": [
+                                {
+                                    "id": str(uuid.uuid4()),  # Unique ID
+                                    "question": question.strip(),
+                                    "answers": [
+                                        {
+                                            "text": answer.strip(),
+                                            "answer_start": answer_start,
+                                        }
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
                     "index": i,
-                    "context": context,
-                    "question": question.strip(),
-                    "answer": answer.strip(),
                 }
                 batch_entries.append(squad_entry)
 
@@ -165,7 +179,7 @@ def prepare_squad_dataset(squad_data):
 
 
 # Function to split the text into chunks of max_length
-def chunk_text(text, tokenizer, lock, max_size=512, overlap=50):
+def chunk_text(data, tokenizer, lock, max_size=512, overlap=50):
     """
     Splits a given text into smaller chunks based on a maximum token size.
 
@@ -175,7 +189,7 @@ def chunk_text(text, tokenizer, lock, max_size=512, overlap=50):
     suitable for further processing.
 
     Args:
-        text (str): The input text to be chunked.
+        text (dict): The dictionary with input text to be chunked.
         tokenizer (PreTrainedTokenizer): The tokenizer associated with
             the model.
         lock (MultiprocessingLock): The thread lock to use for writing.
@@ -184,24 +198,31 @@ def chunk_text(text, tokenizer, lock, max_size=512, overlap=50):
         overlap (int, optional): The amount of allowed overlap chunks.
 
     Returns:
-        list: A list of text chunks, each containing up to max_size tokens.
+        list: A list of dictionaries with text chunks, each containing up to max_size tokens.
 
     Examples:
         chunks = chunk_text("Your long text here...", max_size=512)
     """
-    tokens = tokenizer.encode(text, add_special_tokens=True)
+    tokens = tokenizer.encode(data["text"], add_special_tokens=True)
     chunks = []
 
     # Handle chunking with overlap
     for i in range(0, len(tokens), max_size - overlap):
         part = tokens[i : i + max_size]
         with lock:
-            chunks.append(tokenizer.decode(part, skip_special_token=True))
+            chunks.append(
+                {
+                    "url": data["url"],
+                    "data": tokenizer.decode(part, skip_special_token=True),
+                }
+            )
 
     return chunks
 
 
-def preprocess_custom_data(file_name, tokenizer, qa_model, device_name):
+def preprocess_custom_data(
+    file_name, tokenizer, qa_model, device_name, generate_squad
+):
     """
     Preprocesses custom text data for question-answering model training.
 
@@ -211,9 +232,11 @@ def preprocess_custom_data(file_name, tokenizer, qa_model, device_name):
     Args:
         file_name (str): Path to the text file containing the dataset.
         tokenizer: Tokenizer used to process text into tokens.
-        qa_model (PreTrainedModel): Question-answering model used for generating training
-            data.
-        device_name: The name of the primary compute device
+        qa_model (PreTrainedModel): Question-answering model used for
+            generating training data.
+        device_name (str): The name of the primary compute device.
+        generate_squad (bool): Tells the model whether or not it needs to
+            generate new SQuAD data.
 
     Returns:
         A processed dataset ready for model training.
@@ -237,13 +260,14 @@ def preprocess_custom_data(file_name, tokenizer, qa_model, device_name):
 
     chunked_docs = [item for sublist in chunked_docs for item in sublist]
 
-    # Generate SQuAD-like data
-    generate_squad_format_with_checkpoint(
-        chunks=chunked_docs,
-        qa_model=qa_model,
-        tokenizer=tokenizer,
-        device_name=device_name,
-    )
+    if generate_squad:
+        # Generate SQuAD-like data
+        generate_squad_format_with_checkpoint(
+            chunks=chunked_docs,
+            qa_model=qa_model,
+            tokenizer=tokenizer,
+            device_name=device_name,
+        )
 
     print("Splitting training and testing data")
     squad_data = None
