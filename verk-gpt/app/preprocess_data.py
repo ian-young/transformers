@@ -47,7 +47,7 @@ def generate_squad_format_with_checkpoint(
     device_name,
     look_back=1,
     checkpoint_file=CHECKPOINT_FILE,
-    batch_size=50,
+    batch_size=1,
 ):
     """Generates SQuAD-formatted question-answer pairs from text chunks
     with checkpoint resuming capability.
@@ -99,6 +99,7 @@ def generate_squad_format_with_checkpoint(
         dynamic_ncols=True,
         smoothing=0.5,
     )
+
     for i, chunk in enumerate(chunks):
         if i in processed_indices:
             continue  # Skip already processed indices
@@ -135,6 +136,7 @@ def generate_squad_format_with_checkpoint(
                 question, answer = qa_text.split(
                     tokenizer.sep_token, maxsplit=1
                 )
+                normalized_answer = sub("/s+", "", answer.strip())
 
                 answer_start = context.find(answer.strip())
                 if answer_start == -1:
@@ -143,7 +145,7 @@ def generate_squad_format_with_checkpoint(
                     )
                     continue
 
-                if answer == "Verkada":
+                if normalized_answer == "Verkada":
                     progress_bar.write(
                         f"Skipping chunk {i}: Answer is too simple."
                     )
@@ -161,7 +163,7 @@ def generate_squad_format_with_checkpoint(
                                     "question": question.strip(),
                                     "answers": [
                                         {
-                                            "text": answer.strip(),
+                                            "text": normalized_answer,
                                             "answer_start": answer_start,
                                         }
                                     ],
