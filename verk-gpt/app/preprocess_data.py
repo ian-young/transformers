@@ -47,7 +47,7 @@ def generate_squad_format_with_checkpoint(
     device_name,
     look_back=1,
     checkpoint_file=CHECKPOINT_FILE,
-    batch_size=1,
+    batch_size=75,
 ):
     """Generates SQuAD-formatted question-answer pairs from text chunks
     with checkpoint resuming capability.

@@ -188,7 +188,7 @@ def compute_metrics(p, tokenizer):
     return {"exact_match": em_score["exact_match"], "f1": f1_score["f1"]}
 
 
-def train_model(model, tokenizer, file_name, generate_squad):
+def train_model(model, device_name, tokenizer, file_name, generate_squad):
     """
     Trains a model using text data from a specified file.
 
@@ -199,6 +199,7 @@ def train_model(model, tokenizer, file_name, generate_squad):
 
     Args:
         model (PreTrainedModel): The model to be trained.
+        device_name (str): The device to use for training (CPU, GPU, or MPS).
         tokenizer (PreTrainedTokenizer): The tokenizer associated with
             the model.
         file_name (str): The path to the file containing the training data.
@@ -211,8 +212,6 @@ def train_model(model, tokenizer, file_name, generate_squad):
     Examples:
         train_model(my_model, my_tokenizer, "data.txt")
     """
-    model, device_name = set_torch_device(model=model)
-
     squad_dataset, chunks = preprocess_custom_data(
         file_name, tokenizer, model, device_name, generate_squad
     )
