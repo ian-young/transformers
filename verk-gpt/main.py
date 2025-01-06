@@ -44,7 +44,7 @@ USE_BACKUP = True
 GENERATE_SQUAD_DATA = True
 V_TRAIN = True
 QUERY = "What is Verkada access control?"
-CHECKPOINT_PATH = "./fine_tuned_verkada_gpt2"
+CHECKPOINT_PATH = "./fine_tuned_verkada"
 
 
 def main():
@@ -65,7 +65,7 @@ def main():
         # Step 1: Scrape websites for data
         if not USE_BACKUP:
             scrape_and_save()
-        checkpoint_path = "./fine_tuned_verkada_gpt2"
+        checkpoint_path = "./fine_tuned_verkada"
 
         if exists(checkpoint_path):
             print(

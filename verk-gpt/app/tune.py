@@ -29,17 +29,18 @@ Usage:
 """
 
 # pylint: disable=redefined-outer-name
-from os import cpu_count
 from threading import Lock
 from time import sleep
 
 import app.scrape as scrape  # Importing the scrape functionality
-
 import evaluate
 import torch
 from app.preprocess_data import preprocess_custom_data
+from functools import partial
+from tqdm import tqdm
 
 from transformers import (
+    DataCollatorWithPadding,
     Trainer,
     TrainerCallback,
     TrainingArguments,
@@ -188,6 +189,79 @@ def compute_metrics(p, tokenizer):
     return {"exact_match": em_score["exact_match"], "f1": f1_score["f1"]}
 
 
+def set_training_args(device_name):
+    """Sets up training arguments for a machine learning model.
+
+    Creates a TrainingArguments object with parameters adjusted based on
+    whether a GPU is used or not.  If using 'cuda', enables mixed precision
+    training (fp16) and sets a longer pause duration in the training callback.
+
+
+    Args:
+        device_name (str): The device to use for training ('cuda' or other).
+
+    Returns:
+        tuple: A tuple containing the TrainingArguments object and a
+            PauseTrainingCallback object.
+    """
+
+    if device_name == "cuda":
+        # Define training arguments
+        training_args = TrainingArguments(
+            output_dir="./results",  # Output directory for model checkpoints
+            num_train_epochs=3,  # Number of training epochs
+            gradient_accumulation_steps=4,  # Accumulate gradients over 4 steps
+            per_device_train_batch_size=1,  # Batch size per device during training
+            per_device_eval_batch_size=1,  # Batch size for evaluation
+            warmup_steps=500,  # Number of warmup steps for learning rate scheduler
+            weight_decay=0.01,  # Weight decay strength
+            logging_dir="./logs",  # Directory for storing logs
+            save_steps=500,  # Save model every 500 steps
+            fp16=True,  # Enable mixed precision (only works on supported hardware)
+            save_total_limit=2,  # Keep only the last two checkpoints
+            dataloader_num_workers=2,  # Number of workers for data loading
+            load_best_model_at_end=True,
+            run_name="Verkada Model",
+            eval_strategy="epoch",  # Evaluate after each epoch
+            save_strategy="epoch",  # Save model after each epoch
+            remove_unused_columns=False,
+            disable_tqdm=False,
+        )
+
+        pause_callback = PauseTrainingCallback(
+            pause_after_steps=10000, pause_duration=15
+        )
+    else:
+        # Define training arguments
+        training_args = TrainingArguments(
+            output_dir="./results",  # Output directory for model checkpoints
+            num_train_epochs=2,  # Number of training epochs
+            gradient_accumulation_steps=2,  # Accumulate gradients over 2 steps
+            per_device_train_batch_size=1,  # Batch size per device during training
+            per_device_eval_batch_size=1,  # Batch size for evaluation
+            warmup_steps=200,  # Number of warmup steps for learning rate scheduler
+            weight_decay=0.01,  # Weight decay strength
+            logging_dir="./logs",  # Directory for storing logs
+            save_steps=500,  # Save model every 500 steps
+            save_total_limit=2,  # Keep only the last two checkpoints
+            dataloader_num_workers=0,  # Number of workers for data loading
+            load_best_model_at_end=True,
+            run_name="Verkada Model",
+            eval_strategy="epoch",  # Evaluate after each epoch
+            save_strategy="epoch",  # Save model after each epoch
+            remove_unused_columns=False,
+            disable_tqdm=False,
+            dataloader_drop_last=True,
+            dataloader_pin_memory=True,
+        )
+
+        pause_callback = PauseTrainingCallback(
+            pause_after_steps=500, pause_duration=60
+        )
+
+    return training_args, pause_callback
+
+
 def train_model(model, device_name, tokenizer, file_name, generate_squad):
     """
     Trains a model using text data from a specified file.
@@ -213,75 +287,59 @@ def train_model(model, device_name, tokenizer, file_name, generate_squad):
         train_model(my_model, my_tokenizer, "data.txt")
     """
     squad_dataset, chunks = preprocess_custom_data(
-        file_name, tokenizer, model, device_name, generate_squad
+        file_name,
+        tokenizer,
+        model,
+        device_name,
+        generate_squad,
     )
 
-    if device_name == "cuda":
-        # Define training arguments
-        training_args = TrainingArguments(
-            output_dir="./results",  # Output directory for model checkpoints
-            num_train_epochs=3,  # Number of training epochs
-            gradient_accumulation_steps=4,  # Accumulate gradients over 4 steps
-            per_device_train_batch_size=1,  # Batch size per device during training
-            per_device_eval_batch_size=1,  # Batch size for evaluation
-            warmup_steps=500,  # Number of warmup steps for learning rate scheduler
-            weight_decay=0.01,  # Weight decay strength
-            logging_dir="./logs",  # Directory for storing logs
-            save_steps=500,  # Save model every 500 steps
-            fp16=True,  # Enable mixed precision (only works on supported hardware)
-            save_total_limit=2,  # Keep only the last two checkpoints
-            dataloader_num_workers=cpu_count(),  # Number of workers for data loading
-            load_best_model_at_end=True,
-            run_name="Verkada Model",
-            eval_strategy="epoch",  # Evaluate after each epoch
+    chunk_size = 200  # Training chunks
+    train_chunks = [
+        squad_dataset["train"].select(
+            range(i, min(i + chunk_size, len(squad_dataset["train"])))
         )
-
-        pause_callback = PauseTrainingCallback(
-            pause_after_steps=10000, pause_duration=15
+        for i in range(0, len(squad_dataset["train"]), chunk_size)
+    ]
+    validation_chunks = [
+        squad_dataset["validation"].select(
+            range(i, min(i + chunk_size, len(squad_dataset["validation"])))
         )
-    else:
-        # Define training arguments
-        training_args = TrainingArguments(
-            output_dir="./results",  # Output directory for model checkpoints
-            num_train_epochs=3,  # Number of training epochs
-            gradient_accumulation_steps=4,  # Accumulate gradients over 4 steps
-            per_device_train_batch_size=1,  # Batch size per device during training
-            per_device_eval_batch_size=1,  # Batch size for evaluation
-            warmup_steps=500,  # Number of warmup steps for learning rate scheduler
-            weight_decay=0.01,  # Weight decay strength
-            logging_dir="./logs",  # Directory for storing logs
-            save_steps=500,  # Save model every 500 steps
-            save_total_limit=2,  # Keep only the last two checkpoints
-            dataloader_num_workers=cpu_count(),  # Number of workers for data loading
-            load_best_model_at_end=True,
-            run_name="Verkada Model",
-            eval_strategy="epoch",  # Evaluate after each epoch
-        )
+        for i in range(0, len(squad_dataset["validation"]), chunk_size)
+    ]
 
-        pause_callback = PauseTrainingCallback(
-            pause_after_steps=500, pause_duration=60
-        )
+    training_args, pause_callback = set_training_args(device_name)
 
-    train_dataset = squad_dataset["train"]
-    validation_dataset = squad_dataset["validation"]
+    # test_dataset = squad_dataset["test"]
 
-    # Initialize Trainer
-    trainer = Trainer(
-        model=model,
-        args=training_args,
-        compute_metrics=compute_metrics,
-        train_dataset=train_dataset,
-        eval_dataset=validation_dataset,
-        tokenizer=tokenizer,
-        callbacks=[pause_callback],  # pause to allow cool down period
-    )
+    data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
 
-    # Fine-tune the model
+    print("Starting fine-tuning process.")
+    tuning_batch = zip(train_chunks, validation_chunks)
     print(f"Starting training on {device_name}...")
-    trainer.train()
+    progress_bar = tqdm(
+        total=len(tuning_batch),
+        desc="Overall Progress",
+        position=1, unit="Training batch",
+    )
+    for train_chunk, val_chunk in tuning_batch:
+        # Initialize Trainer
+        trainer = Trainer(
+            model=model,
+            args=training_args,
+            compute_metrics=partial(compute_metrics, tokenizer=tokenizer),
+            train_dataset=train_chunk,
+            eval_dataset=val_chunk,
+            data_collator=data_collator,
+            callbacks=[pause_callback],  # pause to allow cool down period
+        )
 
-    # Save the fine-tuned model
-    model.save_pretrained("./fine_tuned_verkada_gpt2")
-    tokenizer.save_pretrained("./fine_tuned_verkada_gpt2")
+        # Fine-tune the model
+        trainer.train()
+        progress_bar.update(1)
+
+        # Save the fine-tuned model
+        model.save_pretrained("./fine_tuned_verkada")
+        tokenizer.save_pretrained("./fine_tuned_verkada")
 
     return model, chunks

@@ -52,7 +52,7 @@ def embed_chunks(chunks, context_encoder, tokenizer, device):
             return_tensors="pt",
             truncation=True,
             padding=True,
-            max_length=512,
+            max_length=256,
         ).to(device)
         with torch.no_grad():
             embedding = context_encoder(
@@ -88,7 +88,7 @@ def retrieve(
         return_tensors="pt",
         truncation=True,
         padding=True,
-        max_length=512,
+        max_length=256,
     ).to(device)
     with torch.no_grad():
         question_embedding = question_encoder(

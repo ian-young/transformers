@@ -40,6 +40,145 @@ CHECKPOINT_FILE = "squad_data.json"
 logging.getLogger("transformers").setLevel(logging.ERROR)
 
 
+def process_chunks(
+    processed_indices,
+    chunks,
+    qa_model,
+    tokenizer,
+    device_name,
+    look_back,
+    checkpoint_file,
+    batch_size,
+):
+    """Processes text chunks to generate question-answer pairs.
+
+    This function iterates through text chunks, generates questions
+    and answers using a question-answering model, and saves the results
+    in SQuAD format. It includes logic to handle context, tokenization,
+    answer extraction, and batch processing.
+
+
+    Args:
+        processed_indices (list): A list of indices of already processed
+            chunks.
+        chunks (list): A list of text chunks, where each chunk is a
+            dictionary with 'data' (text content) and 'url' keys.
+        qa_model (transformers.Pipeline): The question-answering pipeline.
+        tokenizer (transformers.PreTrainedTokenizer): The tokenizer for
+            the model.
+        device_name (str): The device to use for processing
+            (e.g., 'cuda', 'cpu').
+        look_back (int): The number of previous chunks to include as
+            context.
+        checkpoint_file (str): The path to the file where the processed
+            data will be saved.
+        batch_size (int): The number of entries to accumulate before
+            writing to the checkpoint file.
+    """
+    batch_entries = []
+
+    #! Shortening data for testing purposes
+    progress_bar = tqdm(
+        total=len(chunks[::20]),
+        desc="Processing chunks",
+        unit="chunk",
+        colour="cyan",
+        dynamic_ncols=True,
+        smoothing=0.5,
+    )
+    for i, chunk in enumerate(chunks[::20]):
+        if i in processed_indices or i < len(processed_indices):
+            progress_bar.update(1)
+            continue  # Skip already processed indices
+
+        # Context with look-back
+        context = (
+            "".join(
+                [chunk["data"] for chunk in chunks[max(0, i - look_back) : i]]
+            )
+            + chunk["data"]
+        )
+
+        # Tokenize input
+        inputs = tokenizer(context, return_tensors="pt", truncation=True).to(
+            device_name
+        )
+
+        try:
+            # Generate question-answer pair using the pipeline
+            outputs = qa_model.generate(
+                **inputs, max_length=100
+            )  # Generate with the model directly
+            qa_text = tokenizer.decode(outputs[0], skip_special_tokens=False)
+
+            qa_text = qa_text.replace(tokenizer.pad_token, "").replace(
+                tokenizer.eos_token, ""
+            )
+            # Remove padding tokens at the start of questions
+            qa_text = sub(r"<pad>\s*", "", qa_text)
+
+            # Split into question and answer
+            if tokenizer.sep_token in qa_text:
+
+                question, answer = qa_text.split(
+                    tokenizer.sep_token, maxsplit=1
+                )
+                normalized_answer = sub("/s+", "", answer.strip())
+
+                answer_start = context.find(answer.strip())
+                if answer_start == -1:
+                    progress_bar.write(
+                        f"Skipping chunk {i} | Answer not found in context."
+                    )
+                    progress_bar.update(1)
+                    continue
+
+                if normalized_answer == "Verkada":
+                    progress_bar.write(
+                        f"Skipping chunk {i} | Answer is too simple."
+                    )
+                    progress_bar.update(1)
+                    continue
+
+                # Write to file in SQuAD format. See:
+                # https://huggingface.co/datasets/rajpurkar/squad
+                squad_entry = {
+                    "answers": {
+                        "answer_start": answer_start,
+                        "text": normalized_answer,
+                    },
+                    "context": context,
+                    "id": str(uuid.uuid4()),  # Unique ID
+                    "question": question.strip(),
+                    "title": chunk["url"],  # Placeholder title
+                    "index": i,
+                }
+                batch_entries.append(squad_entry)
+
+                if len(batch_entries) >= batch_size:
+                    with open(checkpoint_file, "a", encoding="utf-8") as file:
+                        for entry in batch_entries:
+                            file.write(json.dumps(entry) + "\n")
+                    batch_entries = []  # Reset the batch
+
+            else:
+                progress_bar.write(
+                    f"Skipping chunk {i} | Failed to generate valid Q&A format."
+                )
+
+            progress_bar.update(1)
+
+        except (ValueError, KeyError, IndexError) as e:
+            print(f"Error processing chunk {i} | {e}")
+
+    progress_bar.write("Writing remaining entries to checkpoint.")
+    progress_bar.close()
+    if batch_entries:
+        with open(checkpoint_file, "a", encoding="utf-8") as file:
+            for entry in batch_entries:
+                file.write(json.dumps(entry) + "\n")
+
+
 def generate_squad_format_with_checkpoint(
     chunks,
     qa_model,
@@ -88,131 +227,94 @@ def generate_squad_format_with_checkpoint(
                 data = json.loads(line.strip())
                 processed_indices.add(data["index"])
 
-    batch_entries = []
-
-    progress_bar = tqdm(
-        total=len(chunks),
-        desc="Processing chunks",
-        initial=len(processed_indices),
-        unit="chunk",
-        colour="cyan",
-        dynamic_ncols=True,
-        smoothing=0.5,
-    )
-
-    for i, chunk in enumerate(chunks):
-        if i in processed_indices:
-            continue  # Skip already processed indices
-
-        # Context with look-back
-        context = (
-            "".join(
-                [chunk["data"] for chunk in chunks[max(0, i - look_back) : i]]
-            )
-            + chunk["data"]
+    if not processed_indices:
+        process_chunks(
+            processed_indices,
+            chunks,
+            qa_model,
+            tokenizer,
+            device_name,
+            look_back,
+            checkpoint_file,
+            batch_size,
         )
-
-        # Tokenize input
-        inputs = tokenizer(context, return_tensors="pt", truncation=True).to(
-            device_name
+    elif max(processed_indices) != len(chunks) - 1:
+        print(
+            f"Continuing from {max(processed_indices)} to get to {len(chunks[::20]) - 1}."
         )
-
-        try:
-            # Generate question-answer pair using the pipeline
-            outputs = qa_model.generate(
-                **inputs, max_length=100
-            )  # Generate with the model directly
-            qa_text = tokenizer.decode(outputs[0], skip_special_tokens=False)
-
-            qa_text = qa_text.replace(tokenizer.pad_token, "").replace(
-                tokenizer.eos_token, ""
-            )
-            # Remove padding tokens at the start of questions
-            qa_text = sub(r"<pad>\s*", "", qa_text)
-
-            # Split into question and answer
-            if tokenizer.sep_token in qa_text:
-
-                question, answer = qa_text.split(
-                    tokenizer.sep_token, maxsplit=1
-                )
-                normalized_answer = sub("/s+", "", answer.strip())
-
-                answer_start = context.find(answer.strip())
-                if answer_start == -1:
-                    progress_bar.write(
-                        f"Skipping chunk {i}: Answer not found in context."
-                    )
-                    continue
-
-                if normalized_answer == "Verkada":
-                    progress_bar.write(
-                        f"Skipping chunk {i}: Answer is too simple."
-                    )
-                    continue
-
-                # Write to file in SQuAD format
-                squad_entry = {
-                    "title": chunk["url"],  # Placeholder title
-                    "paragraphs": [
-                        {
-                            "context": context,
-                            "qas": [
-                                {
-                                    "id": str(uuid.uuid4()),  # Unique ID
-                                    "question": question.strip(),
-                                    "answers": [
-                                        {
-                                            "text": normalized_answer,
-                                            "answer_start": answer_start,
-                                        }
-                                    ],
-                                }
-                            ],
-                        }
-                    ],
-                    "index": i,
-                }
-                batch_entries.append(squad_entry)
-
-                if len(batch_entries) >= batch_size:
-                    with open(checkpoint_file, "a", encoding="utf-8") as file:
-                        for entry in batch_entries:
-                            file.write(json.dumps(entry) + "\n")
-                    batch_entries = []  # Reset the batch
-
-            else:
-                progress_bar.write(
-                    f"Skipping chunk {i}: Failed to generate valid Q&A format."
-                )
-
-            progress_bar.update(1)
-
-        except (ValueError, KeyError, IndexError) as e:
-            print(f"Error processing chunk {i}: {e}")
-
-    progress_bar.close()
-    if batch_entries:
-        with open(checkpoint_file, "a", encoding="utf-8") as file:
-            for entry in batch_entries:
-                file.write(json.dumps(entry) + "\n")
+        process_chunks(
+            processed_indices,
+            chunks,
+            qa_model,
+            tokenizer,
+            device_name,
+            look_back,
+            checkpoint_file,
+            batch_size,
+        )
+    else:
+        print("Chunks already processed. Skipping...")
 
 
-def prepare_squad_dataset(squad_data):
+def prepare_squad_dataset(squad_data, tokenizer):
     """
     Converts SQuAD data into a Hugging Face Dataset object.
 
     Args:
         squad_data (list): List of SQuAD-like dictionaries.
+        tokenizer (PreTrainedTokenizer): The tokenizer to use for encoding.
 
     Returns:
         Dataset: Hugging Face Dataset.
     """
-    return Dataset.from_list(squad_data)
+    tokenized_data = {
+        "input_ids": [],
+        "attention_mask": [],
+        "labels": [],
+    }
+
+    for item in squad_data:
+        question = item["question"]
+        context = item["context"]
+        answer = item["answers"]["text"]
+
+        # Prepare the input
+        input_text = f"question: {question} context: {context}"
+
+        # Tokenize the question and context
+        encoding = tokenizer(
+            input_text,
+            truncation=True,
+            padding="max_length",  # Or "longest", or "do_not_pad"
+            max_length=256,
+            return_tensors="pt",
+        )
+
+        # Tokenize the answer for labels
+        target_encoding = tokenizer(
+            answer,
+            truncation=True,
+            padding="max_length",
+            max_length=64,
+            return_tensors="pt",
+        )
+
+        # Extract the tokenized input_ids and attention_mask
+        input_ids = encoding["input_ids"].squeeze().tolist()
+        attention_mask = encoding["attention_mask"].squeeze().tolist()
+        labels = target_encoding["input_ids"].squeeze().tolist()
+
+        # Append the tokenized values
+        tokenized_data["input_ids"].append(input_ids)
+        tokenized_data["attention_mask"].append(attention_mask)
+        tokenized_data["labels"].append(labels)
+
+    # Convert to Hugging Face Dataset
+    return Dataset.from_dict(tokenized_data)
 
 
 # Function to split the text into chunks of max_length
-def chunk_text(data, tokenizer, max_size=512, overlap=50):
+def chunk_text(data, tokenizer, max_size=256, overlap=50):
     """
     Splits a given text into smaller chunks based on a maximum token size.
 
@@ -226,14 +328,14 @@ def chunk_text(data, tokenizer, max_size=512, overlap=50):
         tokenizer (PreTrainedTokenizer): The tokenizer associated with
             the model.
         max_size (int, optional): The maximum number of tokens allowed in each
-            chunk. Defaults to 1024.
+            chunk. Defaults to 256.
         overlap (int, optional): The amount of allowed overlap chunks.
 
     Returns:
         list: A list of dictionaries with text chunks, each containing up to max_size tokens.
 
     Examples:
-        chunks = chunk_text("Your long text here...", max_size=512)
+        chunks = chunk_text("Your long text here...", max_size=256)
     """
     chunks = []
 
@@ -319,18 +421,17 @@ def preprocess_custom_data(
         )
 
     print("Splitting training and testing data")
-    squad_data = None
-    with open("squad_data.txt", "r", encoding="UTF-8") as file:
-        squad_data = file.read()
-
+    squad_data = []
+    with open("squad_data.json", "r", encoding="UTF-8") as file:
+        squad_data.extend(json.loads(line.strip()) for line in file)
     train_data, test_data = train_test_split(squad_data, test_size=0.2)
     test_data, validation_data = train_test_split(test_data, test_size=1 / 3)
 
     # Prepare Hugging Face datasets
     print("Preparing dataset")
-    train_dataset = prepare_squad_dataset(train_data)
-    test_dataset = prepare_squad_dataset(test_data)
-    validation_dataset = prepare_squad_dataset(validation_data)
+    train_dataset = prepare_squad_dataset(train_data, tokenizer)
+    test_dataset = prepare_squad_dataset(test_data, tokenizer)
+    validation_dataset = prepare_squad_dataset(validation_data, tokenizer)
 
     return {
         "train": train_dataset,
