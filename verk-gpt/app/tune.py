@@ -29,14 +29,15 @@ Usage:
 """
 
 # pylint: disable=redefined-outer-name
+from functools import partial
 from threading import Lock
 from time import sleep
 
 import app.scrape as scrape  # Importing the scrape functionality
+import numpy as np
 import evaluate
 import torch
 from app.preprocess_data import preprocess_custom_data
-from functools import partial
 from tqdm import tqdm
 
 from transformers import (
@@ -59,13 +60,11 @@ def set_torch_device(model=None):
         device (str): The device being used (GPU, CPU, or MPS).
     """
     # Check if MPS is available on Apple Silicon
-    if torch.backends.mps.is_available():
-        device_name = "mps"
-    elif torch.cuda.is_available():
-        device_name = "cuda"
-    else:
-        device_name = "cpu"
-
+    # Uncomment to run with MPS.
+    # Warning: MPS is slower than CPU in some instances
+    # if torch.backends.mps.is_available():
+    #     device_name = "mps"
+    device_name = "cuda" if torch.cuda.is_available() else "cpu"
     if model:
         model.to(device_name)
 
@@ -165,28 +164,29 @@ def compute_metrics(p, tokenizer):
     Returns:
         dict: Dictionary containing the EM and F1 scores
     """
-    # initialize_metrics
-    exact_match = evaluate.load("exact_match")
-    f1 = evaluate.load("f1")
+    # Load the ROUGE metric
+    rouge = evaluate.load("rouge")
 
-    preds = p.predictions
+    # Get predictions and labels
+    logits = p.predictions[0]
+    pred_token_ids = np.argmax(logits, axis=-1)
     labels = p.label_ids
+    print(pred_token_ids)
+    print(type(pred_token_ids))
+    print(pred_token_ids.shape)
 
     # Decode the predicted and label token IDs to text
-    decoded_preds = tokenizer.batch_decode(preds, skip_special_tokens=True)
+    decoded_preds = tokenizer.batch_decode(
+        pred_token_ids, skip_special_tokens=True
+    )
     decoded_labels = tokenizer.batch_decode(labels, skip_special_tokens=True)
 
     # Strip leading/trailing whitespaces from the predictions and labels
     decoded_preds = [pred.strip() for pred in decoded_preds]
     decoded_labels = [label.strip() for label in decoded_labels]
 
-    # Compute Exact Match (EM) and F1 score
-    em_score = exact_match.compute(
-        predictions=decoded_preds, references=decoded_labels
-    )
-    f1_score = f1.compute(predictions=decoded_preds, references=decoded_labels)
-
-    return {"exact_match": em_score["exact_match"], "f1": f1_score["f1"]}
+    # Compute ROUGE score
+    return rouge.compute(predictions=decoded_preds, references=decoded_labels)
 
 
 def set_training_args(device_name):
@@ -226,6 +226,7 @@ def set_training_args(device_name):
             save_strategy="epoch",  # Save model after each epoch
             remove_unused_columns=False,
             disable_tqdm=False,
+            gradient_checkpointing=True,
         )
 
         pause_callback = PauseTrainingCallback(
@@ -239,11 +240,11 @@ def set_training_args(device_name):
             gradient_accumulation_steps=2,  # Accumulate gradients over 2 steps
             per_device_train_batch_size=1,  # Batch size per device during training
             per_device_eval_batch_size=1,  # Batch size for evaluation
-            warmup_steps=200,  # Number of warmup steps for learning rate scheduler
+            warmup_steps=100,  # Number of warmup steps for learning rate scheduler
             weight_decay=0.01,  # Weight decay strength
             logging_dir="./logs",  # Directory for storing logs
-            save_steps=500,  # Save model every 500 steps
-            save_total_limit=2,  # Keep only the last two checkpoints
+            save_steps=200,  # Save model every 200 steps
+            save_total_limit=1,  # Keep only the last two checkpoints
             dataloader_num_workers=0,  # Number of workers for data loading
             load_best_model_at_end=True,
             run_name="Verkada Model",
@@ -253,6 +254,7 @@ def set_training_args(device_name):
             disable_tqdm=False,
             dataloader_drop_last=True,
             dataloader_pin_memory=True,
+            gradient_checkpointing=True,
         )
 
         pause_callback = PauseTrainingCallback(
@@ -294,7 +296,7 @@ def train_model(model, device_name, tokenizer, file_name, generate_squad):
         generate_squad,
     )
 
-    chunk_size = 200  # Training chunks
+    chunk_size = 50  # Training chunks
     train_chunks = [
         squad_dataset["train"].select(
             range(i, min(i + chunk_size, len(squad_dataset["train"])))
@@ -315,14 +317,18 @@ def train_model(model, device_name, tokenizer, file_name, generate_squad):
     data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
 
     print("Starting fine-tuning process.")
-    tuning_batch = zip(train_chunks, validation_chunks)
     print(f"Starting training on {device_name}...")
+
+    tuning_batches = list(zip(train_chunks, validation_chunks))
+    print(f"Will train {len(tuning_batches)} amount of times.")
+
     progress_bar = tqdm(
-        total=len(tuning_batch),
+        total=len(tuning_batches),
         desc="Overall Progress",
-        position=1, unit="Training batch",
+        position=1,
+        unit="Training batch",
     )
-    for train_chunk, val_chunk in tuning_batch:
+    for train_chunk, val_chunk in tuning_batches:
         # Initialize Trainer
         trainer = Trainer(
             model=model,

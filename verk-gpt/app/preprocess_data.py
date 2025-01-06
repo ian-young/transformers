@@ -133,7 +133,7 @@ def process_chunks(
                     progress_bar.update(1)
                     continue
 
-                if normalized_answer == "Verkada":
+                if normalized_answer in ["Verkada", "Verkada Inc."]:
                     progress_bar.write(
                         f"Skipping chunk {i} | Answer is too simple."
                     )
@@ -238,7 +238,7 @@ def generate_squad_format_with_checkpoint(
             checkpoint_file,
             batch_size,
         )
-    elif max(processed_indices) != len(chunks) - 1:
+    elif max(processed_indices) != len(chunks[::20]) - 1:
         print(
             f"Continuing from {max(processed_indices)} to get to {len(chunks[::20]) - 1}."
         )
@@ -286,7 +286,7 @@ def prepare_squad_dataset(squad_data, tokenizer):
             input_text,
             truncation=True,
             padding="max_length",  # Or "longest", or "do_not_pad"
-            max_length=256,
+            max_length=192,
             return_tensors="pt",
         )
 
@@ -314,7 +314,7 @@ def prepare_squad_dataset(squad_data, tokenizer):
 
 
 # Function to split the text into chunks of max_length
-def chunk_text(data, tokenizer, max_size=256, overlap=50):
+def chunk_text(data, tokenizer, max_size=192, overlap=50):
     """
     Splits a given text into smaller chunks based on a maximum token size.
 
@@ -328,14 +328,14 @@ def chunk_text(data, tokenizer, max_size=256, overlap=50):
         tokenizer (PreTrainedTokenizer): The tokenizer associated with
             the model.
         max_size (int, optional): The maximum number of tokens allowed in each
-            chunk. Defaults to 256.
+            chunk. Defaults to 192.
         overlap (int, optional): The amount of allowed overlap chunks.
 
     Returns:
         list: A list of dictionaries with text chunks, each containing up to max_size tokens.
 
     Examples:
-        chunks = chunk_text("Your long text here...", max_size=256)
+        chunks = chunk_text("Your long text here...", max_size=192)
     """
     chunks = []
 
