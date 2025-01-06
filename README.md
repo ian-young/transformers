@@ -31,6 +31,9 @@ The flow of the script is as follows:
         generate_squad_format_with_checkpoint
         chunk_text
         preprocess_custom_data
+        process_chunks
+        prepare_squad_data
+        tokenize_data_item
 
     end
 
@@ -44,7 +47,8 @@ The flow of the script is as follows:
     train_model -.-> preprocess_custom_data -.-> compute_metrics
     train_model --- Callback
 
-    preprocess_custom_data --> chunk_text --> generate_squad_format_with_checkpoint
+    preprocess_custom_data --> chunk_text --> generate_squad_format_with_checkpoint --> process_chunks --> prepare_squad_data --> tokenize_data_item
+    prepare_squad_data --> tokenize_data_item
 
     retrieve --> embed_chunks
 ```
