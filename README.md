@@ -9,7 +9,6 @@ The flow of the script is as follows:
 ```mermaid
     flowchart TB
     subgraph retriever.py
-        create_retriever
         retrieve
         embed_chunks
     end
@@ -37,7 +36,7 @@ The flow of the script is as follows:
 
     end
 
-    main.py ==> scrape_and_save ==> set_torch_device ===> create_retriever ==> train_model ==> retrieve
+    main.py ==> scrape_and_save ==> set_torch_device ==> train_model ==> retrieve
 
     scrape_and_save -.-> scrape_website
     scrape_website --> chunk_urls --> scrape_urls
