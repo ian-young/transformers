@@ -60,11 +60,13 @@ def set_torch_device(model=None):
         device (str): The device being used (GPU, CPU, or MPS).
     """
     # Check if MPS is available on Apple Silicon
-    # Uncomment to run with MPS.
-    # Warning: MPS is slower than CPU in some instances
-    # if torch.backends.mps.is_available():
-    #     device_name = "mps"
-    device_name = "cuda" if torch.cuda.is_available() else "cpu"
+    if torch.backends.mps.is_available():
+        device_name = "mps"
+    elif torch.cuda.is_available():
+        device_name = "cuda"
+    else:
+        device_name = "cpu"
+
     if model:
         model.to(device_name)
 
@@ -171,9 +173,6 @@ def compute_metrics(p, tokenizer):
     logits = p.predictions[0]
     pred_token_ids = np.argmax(logits, axis=-1)
     labels = p.label_ids
-    print(pred_token_ids)
-    print(type(pred_token_ids))
-    print(pred_token_ids.shape)
 
     # Decode the predicted and label token IDs to text
     decoded_preds = tokenizer.batch_decode(

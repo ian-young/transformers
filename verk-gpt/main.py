@@ -35,6 +35,7 @@ from app.tune import (  # Importing the function to start training
     train_model,
 )
 
+import torch
 from transformers import (
     AutoModelForSeq2SeqLM,
     AutoTokenizer,
@@ -87,7 +88,6 @@ def main():
         )
 
         qa_model, device = app.set_torch_device(qa_model)
-        context_encoder, question_encoder = app.create_retriever(device=device)
         tokenizer.pad_token = tokenizer.eos_token
 
         if V_TRAIN:
@@ -108,16 +108,27 @@ def main():
         relevant_chunks = app.retrieve(
             query=QUERY,
             chunks=chunks,
-            question_encoder=question_encoder,
-            context_encoder=context_encoder,
+            model=model,
             tokenizer=tokenizer,
             device=device,
         )
 
         # Choose the most relevant chunk (for simplicity)
-        context = relevant_chunks[0]
-        answer = model(question=QUERY, context=context)
-        print(f"Response: {answer}")
+        context = relevant_chunks["data"]
+        input_text = f"question: {QUERY} context: {context}"
+        inputs = tokenizer(
+            input_text,
+            return_tensors="pt",
+            truncation=True,
+            padding=True,
+            max_length=512,
+        ).to(device)
+
+        # Generate the answer
+        with torch.no_grad():
+            outputs = model.generate(**inputs, max_new_tokens=100)
+        answer = tokenizer.decode(outputs[0], skip_special_tokens=True)
+        print(f"Response: {answer}\nSee {relevant_chunks['url']}")
     except KeyboardInterrupt:
         print("Exiting...")
 

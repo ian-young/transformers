@@ -8,37 +8,19 @@ and performing semantic document retrieval using pre-trained DPR models
 from Facebook. It enables efficient chunk selection based on query similarity.
 """
 
+from os.path import exists
+
 import torch
-from transformers import DPRContextEncoder, DPRQuestionEncoder
+from tqdm import tqdm
 
 
-def create_retriever(device):
-    """
-    Creates a Dense Passage Retriever (DPR) for chunk retrieval.
-
-    Args:
-        device (str): Device to use for compute.
-
-    Returns:
-        context_encoder, question_encoder: DPR encoder models.
-    """
-    # Load the pre-trained DPR models
-    context_encoder = DPRContextEncoder.from_pretrained(
-        "facebook/dpr-ctx_encoder-single-nq-base"
-    ).to(device)
-    question_encoder = DPRQuestionEncoder.from_pretrained(
-        "facebook/dpr-question_encoder-single-nq-base"
-    ).to(device)
-    return context_encoder, question_encoder
-
-
-def embed_chunks(chunks, context_encoder, tokenizer, device):
+def embed_chunks(chunks, model, tokenizer, device):
     """
     Embeds document chunks using the context encoder.
 
     Args:
         chunks (list): List of document text chunks.
-        context_encoder: The DPR context encoder model.
+        model: The model used for generating text.
         tokenizer: The tokenizer for encoding the text.
         device (str): Device to use for compute.
 
@@ -46,42 +28,41 @@ def embed_chunks(chunks, context_encoder, tokenizer, device):
         list: List of embeddings for the chunks.
     """
     embeddings = []
-    for chunk in chunks:
+
+    for chunk in tqdm(chunks, desc="Embedding chunks", unit="chunk"):
         inputs = tokenizer(
-            chunk,
+            chunk["data"],
             return_tensors="pt",
             truncation=True,
             padding=True,
             max_length=192,
         ).to(device)
+
         with torch.no_grad():
-            embedding = context_encoder(
-                **inputs
-            ).pooler_output  # Get the chunk embedding
+            outputs = model.encoder(**inputs)
+            embedding = outputs.last_hidden_state.mean(
+                dim=1
+            )  # Aggregate embeddings
         embeddings.append(embedding)
 
-    # Stack embeddings into a single tensor for efficient computation.
-    # Tensor stacks utilize vectorized operations.
-    return torch.stack(embeddings)
+    return torch.cat(embeddings)
 
 
-def retrieve(
-    query, chunks, question_encoder, context_encoder, tokenizer, device
-):
+def retrieve(query, chunks, model, tokenizer, device):
     """
     Retrieves the most relevant chunk for a given query.
 
     Args:
         query (str): The question to retrieve relevant chunks for.
         chunks (list): List of document text chunks.
-        question_encoder: The DPR question encoder model.
-        context_encoder: The DPR context encoder model.
+        model: The model used for generating the text.
         tokenizer: The tokenizer for encoding the text.
         device (str): Device to use for compute.
 
     Returns:
         str: The most relevant chunk of text.
     """
+    model.to(device)
     # Encode the query using the question encoder
     question_inputs = tokenizer(
         query,
@@ -91,12 +72,19 @@ def retrieve(
         max_length=192,
     ).to(device)
     with torch.no_grad():
-        question_embedding = question_encoder(
-            **question_inputs
-        ).pooler_output  # Get the query embedding
+        question_embedding = model.encoder(**question_inputs)[0].mean(dim=1)
 
-    # Encode the chunks
-    chunk_embeddings = embed_chunks(chunks, context_encoder, tokenizer, device)
+    # Get chunk embeddings
+    if exists("chunk_embeddings.emb"):
+        # Load pre-processed embeddings
+        print("Loading pre-processed chunks.")
+        chunk_embeddings = torch.load(
+            "chunk_embeddings.emb", map_location=device, weights_only=True
+        )
+    else:
+        # Encode the chunks
+        chunk_embeddings = embed_chunks(chunks[::20], model, tokenizer, device)
+        torch.save(chunk_embeddings, "chunk_embeddings.emb")
 
     # Calculate similarity between the query and each chunk (cosine similarity)
     similarities = []
