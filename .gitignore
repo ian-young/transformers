@@ -5,6 +5,7 @@ verkada_data.txt
 squad_data.json
 squad_data_backup.json
 chunk_embeddings.emb
+batch_tracking.tmp
 
 # DS Store
 .DS_Store
