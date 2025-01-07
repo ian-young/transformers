@@ -30,6 +30,8 @@ Usage:
 
 # pylint: disable=redefined-outer-name
 from functools import partial
+from os import remove
+from os.path import exists
 from threading import Lock
 from time import sleep
 
@@ -287,6 +289,13 @@ def train_model(model, device_name, tokenizer, file_name, generate_squad):
     Examples:
         train_model(my_model, my_tokenizer, "data.txt")
     """
+    if exists("batch_tracking.tmp"):
+        print("Resuming from previous training session.")
+        with open("batch_tracking.tmp", 'r', encoding='utf-8') as file:
+            batch_number = file.readline().strip()
+    else:
+        batch_number = 0
+
     squad_dataset, chunks = preprocess_custom_data(
         file_name,
         tokenizer,
@@ -327,7 +336,11 @@ def train_model(model, device_name, tokenizer, file_name, generate_squad):
         position=1,
         unit="Training batch",
     )
-    for train_chunk, val_chunk in tuning_batches:
+    for idx, (train_chunk, val_chunk) in enumerate(tuning_batches):
+        if idx <= batch_number:
+            # Batch has been processed, skip
+            progress_bar.update(1)
+            continue
         # Initialize Trainer
         trainer = Trainer(
             model=model,
@@ -347,4 +360,8 @@ def train_model(model, device_name, tokenizer, file_name, generate_squad):
         model.save_pretrained("./fine_tuned_verkada")
         tokenizer.save_pretrained("./fine_tuned_verkada")
 
+        with open("batch_tracking.tmp", 'w', encoding='utf-8') as file:
+            file.write(str(idx))
+
+    remove("batch_tracking.tmp")  # Remove the temporary file
     return model, chunks
