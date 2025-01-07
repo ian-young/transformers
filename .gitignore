@@ -1,9 +1,10 @@
-# Ignore trained GPT models
-fine_tuned_verkada_gpt2
+# Ignore trained models
+fine_tuned_verkada
 results
 verkada_data.txt
 squad_data.json
 squad_data_backup.json
+chunk_embeddings.emb
 
 # DS Store
 .DS_Store
