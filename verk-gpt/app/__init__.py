@@ -1,1 +1,2 @@
-from .gptmodel import test_gpt2_query
+from .retriever import retrieve, embed_chunks
+from .tune import set_torch_device

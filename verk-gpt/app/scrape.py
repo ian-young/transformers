@@ -31,11 +31,15 @@ import threading
 import math
 import re
 from os import cpu_count
+from json import dumps
 from concurrent.futures import ThreadPoolExecutor
 
 import fitz
 import requests
 from bs4 import BeautifulSoup
+from colorama import Fore, Style, init
+
+init(autoreset=True)
 
 # Define a headers dictionary with a common User-Agent string
 headers = {
@@ -133,7 +137,9 @@ def scrape_urls(urls, visited_urls, lock):
 
             visited_urls.add(url)  # Mark this URL as visited
 
-        print(f"Scraping {url}...")
+        print(
+            f"{Fore.GREEN}Scraping {Fore.LIGHTBLACK_EX}{url}{Style.RESET_ALL}"
+        )
         data = ""
         response = requests.get(
             url, headers=headers, timeout=5
@@ -141,16 +147,18 @@ def scrape_urls(urls, visited_urls, lock):
         soup = BeautifulSoup(response.content, "html.parser")
 
         if "application/pdf" in response.headers.get("Content-Type", ""):
-            print(f"Extracting text from PDF at {url}...")
-            pdf_text = extract_text_from_pdf(response.content)
-            data += pdf_text + "\n\n"
+            print(
+                f"{Fore.CYAN}Extracting{Style.RESET_ALL}"
+                f"text from PDF at {Fore.LIGHTBLACK_EX}{url}{Style.RESET_ALL}"
+            )
+            data = extract_text_from_pdf(response.content)
         elif "text/html" in response.headers.get("Content-Type", ""):
 
             # Get all paragraphs and headings
             paragraphs = soup.find_all(
                 ["p", "h1", "h2", "h3", "h4", "h5", "h6"]
             )
-            content = " ".join(
+            data = "\n".join(
                 [
                     para.get_text().strip()
                     for para in paragraphs
@@ -158,14 +166,17 @@ def scrape_urls(urls, visited_urls, lock):
                     not in para.get_text()
                 ]
             )
-            data += content + "\n\n"
         else:
-            print(f"Skipping non-HTML content from {url}")
+            print(
+                f"Skipping {Fore.RED}non-HTML{Style.RESET_ALL} "
+                f"content from {Fore.LIGHTBLACK_EX}{url}{Style.RESET_ALL}"
+            )
 
+        data_list = {"url": url, "text": data}
         # Save the scraped data to a file
         with lock:
             with open("verkada_data.txt", "a", encoding="utf-8") as file:
-                file.write(data)
+                file.write(dumps(data_list, ensure_ascii=False) + "\n\n")
 
         with ThreadPoolExecutor(max_workers=cpu_count() * 2) as executor:
             # Scrape links from this page and add to the list
@@ -200,7 +211,7 @@ def extract_text_from_pdf(pdf_content):
             text += page_text
 
     # Remove newlines, carriage returns, and extra spaces
-    text = " ".join(text.split())
+    # text = " ".join(text.split())
     return text
 
 
@@ -243,15 +254,25 @@ def scrape_links(url, soup, urls, visited_urls, lock):
             full_url = f"{url}{href}" if href.startswith("/") else href
 
             # Check if the URL contains "verkada"
-            if not re.search(r"verkada", full_url, re.IGNORECASE) or any(
-                domain in full_url
-                for domain in [
-                    "linkdin.com",
-                    "github.com",
-                    "verkada.intercom-attachements-7.com",
-                ]
+            if (
+                any(
+                    domain in full_url
+                    for domain in [
+                        "linkdin.com",
+                        "github.com",
+                    ]
+                )
+                or re.search(r"verkada.com/ja", full_url, re.IGNORECASE)
+                or re.search(
+                    r"intercom-attachments-7", full_url, re.IGNORECASE
+                )
+                or not re.search(r"verkada", full_url, re.IGNORECASE)
             ):
-                continue  # Skip the URL if it does not
+                print(
+                    f"{Fore.RED}Skipping"
+                    f"{Fore.LIGHTBLACK_EX}{full_url}{Style.RESET_ALL}"
+                )
+                continue  # Skip the URL
 
             # Check if this URL has already been added to avoid duplicates
             if full_url not in urls:

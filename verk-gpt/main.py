@@ -35,12 +35,17 @@ from app.tune import (  # Importing the function to start training
     train_model,
 )
 
-from transformers import GPT2LMHeadModel, GPT2Tokenizer
+import torch
+from transformers import (
+    AutoModelForSeq2SeqLM,
+    AutoTokenizer,
+)
 
 USE_BACKUP = True
-MODEL_NAME = "gpt2"
+GENERATE_SQUAD_DATA = True
+V_TRAIN = True
 QUERY = "What is Verkada access control?"
-CHECKPOINT_PATH = "./fine_tuned_verkada_gpt2"
+CHECKPOINT_PATH = "./fine_tuned_verkada"
 
 
 def main():
@@ -61,37 +66,69 @@ def main():
         # Step 1: Scrape websites for data
         if not USE_BACKUP:
             scrape_and_save()
+        checkpoint_path = "./fine_tuned_verkada"
 
-        # Step 2: Load the model and tokenizer (will be used for fine-tuning after training)
-        if exists(CHECKPOINT_PATH):
-            # Load the partially-trained model
-            print(f"Loading model from checkpoint: {CHECKPOINT_PATH}")
-            model = GPT2LMHeadModel.from_pretrained(CHECKPOINT_PATH)
-            tokenizer = GPT2Tokenizer.from_pretrained(CHECKPOINT_PATH)
-        else:
-            # Start training a new model
+        if exists(checkpoint_path):
             print(
-                f"No checkpoint found. Initializing from base model: {MODEL_NAME}"
+                f"Loading model and tokenizer from checkpoint: {checkpoint_path}"
             )
-            model = GPT2LMHeadModel.from_pretrained(MODEL_NAME)
-            tokenizer = GPT2Tokenizer.from_pretrained(MODEL_NAME)
+            qa_model = AutoModelForSeq2SeqLM.from_pretrained(checkpoint_path)
+            tokenizer = AutoTokenizer.from_pretrained(checkpoint_path)
+        else:
+            # Step 2: Load the model and tokenizer (will be used for fine-tuning after training)
+            qa_model_name = "potsawee/t5-large-generation-squad-QuestionAnswer"
+            print(
+                f"No checkpoint found. Initializing from base model: {qa_model_name}"
+            )
+            qa_model = AutoModelForSeq2SeqLM.from_pretrained(qa_model_name)
+            tokenizer = AutoTokenizer.from_pretrained(qa_model_name)
 
-        # Step 3: Start the training process (this will fine-tune the model)
-        train_model(
-            model,
-            tokenizer,
-            "verkada_data_backup.txt" if USE_BACKUP else "verkada_data.txt",
+        file_name = (
+            "verkada_data_backup.txt" if USE_BACKUP else "verkada_data.txt"
         )
 
-        # Step 4: After training, load the fine-tuned model
-        model = GPT2LMHeadModel.from_pretrained("./fine_tuned_verkada_gpt2")
-        tokenizer = GPT2Tokenizer.from_pretrained("./fine_tuned_verkada_gpt2")
+        qa_model, device = app.set_torch_device(qa_model)
+        tokenizer.pad_token = tokenizer.eos_token
 
-        # Step 5: Test the fine-tuned model using the custom query
-        response = app.test_gpt2_query(
-            model, tokenizer, QUERY
-        )  # Use the fine-tuned model and tokenizer
-        print(f"Response: {response}")
+        if V_TRAIN:
+            print("Training on Verkada.")
+            model, chunks = train_model(
+                qa_model,
+                device,
+                tokenizer,
+                file_name,
+                GENERATE_SQUAD_DATA,
+            )
+        else:
+            print("Skipping product training")
+            model = qa_model
+            chunks = []
+
+        # Step 4: Querying example (for inference using retriever and QA model)
+        relevant_chunks = app.retrieve(
+            query=QUERY,
+            chunks=chunks,
+            model=model,
+            tokenizer=tokenizer,
+            device=device,
+        )
+
+        # Choose the most relevant chunk (for simplicity)
+        context = relevant_chunks["data"]
+        input_text = f"question: {QUERY} context: {context}"
+        inputs = tokenizer(
+            input_text,
+            return_tensors="pt",
+            truncation=True,
+            padding=True,
+            max_length=512,
+        ).to(device)
+
+        # Generate the answer
+        with torch.no_grad():
+            outputs = model.generate(**inputs, max_new_tokens=100)
+        answer = tokenizer.decode(outputs[0], skip_special_tokens=True)
+        print(f"Response: {answer}\nSee {relevant_chunks['url']}")
     except KeyboardInterrupt:
         print("Exiting...")
 

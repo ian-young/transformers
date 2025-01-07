@@ -29,39 +29,48 @@ Usage:
 """
 
 # pylint: disable=redefined-outer-name
-
-from os import cpu_count
+from functools import partial
 from threading import Lock
 from time import sleep
 
-import app.scrape  # Importing the scrape functionality
+import app.scrape as scrape  # Importing the scrape functionality
+import numpy as np
+import evaluate
 import torch
-from datasets import Dataset
+from app.preprocess_data import preprocess_custom_data
 from tqdm import tqdm
 
 from transformers import (
-    GPT2LMHeadModel,
-    GPT2Tokenizer,
+    DataCollatorWithPadding,
     Trainer,
-    TrainingArguments,
     TrainerCallback,
+    TrainingArguments,
 )
 
-# Check if MPS is available on Apple Silicon
-if torch.backends.mps.is_available():
-    device = torch.device("mps")
-elif torch.cuda.is_available():
-    device = torch.device("cuda")
-else:
-    device = torch.device("cpu")
 
-# Initialize the tokenizer and model
-tokenizer = GPT2Tokenizer.from_pretrained("gpt2-medium")
-tokenizer.pad_token = tokenizer.eos_token  # Setting pad_token to eos_token
+def set_torch_device(model=None):
+    """Sets the appropriate device for the model based on the available
+    hardware.
 
-# Make sure the model is loaded with the correct configuration
-model = GPT2LMHeadModel.from_pretrained("gpt2-medium")
-model.to(device)  # Move model to MPS or CPU
+    Args:
+        model (optional): The model to be set on the appropriate device.
+
+    Returns:
+        model: The model with the device set.
+        device (str): The device being used (GPU, CPU, or MPS).
+    """
+    # Check if MPS is available on Apple Silicon
+    if torch.backends.mps.is_available():
+        device_name = "mps"
+    elif torch.cuda.is_available():
+        device_name = "cuda"
+    else:
+        device_name = "cpu"
+
+    if model:
+        model.to(device_name)
+
+    return model, device_name
 
 
 class PauseTrainingCallback(TrainerCallback):
@@ -88,7 +97,7 @@ class PauseTrainingCallback(TrainerCallback):
         Callback to pause training after a specified number of steps.
 
         Args:
-            pause_after_steps (int): Number of steps after which to paus
+            pause_after_steps (int): Number of steps after which to pause
                 training.
             pause_duration (int): Duration of the pause in seconds.
         """
@@ -101,15 +110,15 @@ class PauseTrainingCallback(TrainerCallback):
             state.global_step % self.pause_after_steps == 0
             and state.global_step > 0
         ):
-            print(
-                f"Pausing training at step {state.global_step} for "
-                f"{self.pause_duration}s to cool down."
-            )
+            # Uncomment for added verbosity
+            # print(
+            #     f"Pausing training at step {state.global_step} for "
+            #     f"{self.pause_duration}s to cool down."
+            # )
             sleep(self.pause_duration)
         return control
 
 
-# Function to scrape the data and save to text file
 def scrape_and_save():
     """
     Scrapes data from predefined websites and saves it to a file.
@@ -137,85 +146,124 @@ def scrape_and_save():
         "https://verkada.com",  # Home page
         "https://verkada.com/pricing",  # Pricing page
     ]
-    app.scrape.scrape_website(
+    scrape.scrape_website(
         urls, visited_urls, lock
     )  # Calling the scrape function to save data
     print("Scraping complete, data saved to verkada_data.txt.")
 
 
-# Function to split the text into chunks of max_length
-def chunk_text(text, max_size=1024):
+def compute_metrics(p, tokenizer):
     """
-    Splits a given text into smaller chunks based on a maximum token size.
-
-    This function encodes the input text into tokens and divides it into
-    manageable chunks that do not exceed the specified maximum size. It ensures
-    that each chunk is properly decoded back into text format, making it
-    suitable for further processing.
+    Computes the Exact Match (EM) and F1 score for the model predictions.
 
     Args:
-        text (str): The input text to be chunked.
-        max_size (int, optional): The maximum number of tokens allowed in each
-            chunk. Defaults to 1024.
+        p: Tuple containing the predictions and labels
+            p.predictions (numpy array): Model's predicted token IDs
+            p.label_ids (numpy array): Ground truth token IDs
+        tokenizer (PreTrainedTokenizer): The tokenizer associated with
+            the model.
 
     Returns:
-        list: A list of text chunks, each containing up to max_size tokens.
-
-    Examples:
-        chunks = chunk_text("Your long text here...", max_size=512)
+        dict: Dictionary containing the EM and F1 scores
     """
-    tokens = tokenizer.encode(text, add_special_tokens=True)
-    chunks = []
+    # Load the ROUGE metric
+    rouge = evaluate.load("rouge")
 
-    # If the token list exceeds max_size, split further by tokens
-    while len(tokens) > max_size:
-        # print(f"Chunk exceeds max size of {max_size}, splitting further...")
-        part = tokens[:max_size]  # Get a part that fits within the token limit
-        chunks.append(tokenizer.decode(part, skip_special_tokens=True))
-        tokens = tokens[max_size:]  # Move to the next part
+    # Get predictions and labels
+    logits = p.predictions[0]
+    pred_token_ids = np.argmax(logits, axis=-1)
+    labels = p.label_ids
 
-    # After splitting, check for any remaining tokens and add them
-    if len(tokens) > 0:
-        chunks.append(tokenizer.decode(tokens, skip_special_tokens=True))
-
-    return chunks
-
-
-# Tokenize the dataset (GPT-2 requires text to be tokenized)
-def tokenize_function(examples):
-    """
-    Tokenizes input text examples and prepares them for model training.
-
-    This function takes a dictionary of examples, tokenizes the text, and
-    ensures that the resulting token sequences are properly padded and
-    truncated to a maximum length. It also creates labels that are identical
-    to the input token IDs, making it suitable for supervised learning tasks.
-
-    Args:
-        examples (dict): A dictionary containing the text examples to be tokenized.
-
-    Returns:
-        dict: A dictionary containing the tokenized inputs and labels.
-
-    Examples:
-        tokenized_inputs = tokenize_function(
-            {"text": "Sample text for tokenization."}
-        )
-    """
-    inputs = tokenizer(
-        examples["text"],
-        padding="max_length",
-        truncation=True,
-        max_length=1024,
+    # Decode the predicted and label token IDs to text
+    decoded_preds = tokenizer.batch_decode(
+        pred_token_ids, skip_special_tokens=True
     )
+    decoded_labels = tokenizer.batch_decode(labels, skip_special_tokens=True)
 
-    # Labels are the same as input_ids
-    inputs["labels"] = inputs["input_ids"].copy()
-    return inputs
+    # Strip leading/trailing whitespaces from the predictions and labels
+    decoded_preds = [pred.strip() for pred in decoded_preds]
+    decoded_labels = [label.strip() for label in decoded_labels]
+
+    # Compute ROUGE score
+    return rouge.compute(predictions=decoded_preds, references=decoded_labels)
 
 
-# Function to train the model
-def train_model(model, tokenizer, file_name):
+def set_training_args(device_name):
+    """Sets up training arguments for a machine learning model.
+
+    Creates a TrainingArguments object with parameters adjusted based on
+    whether a GPU is used or not.  If using 'cuda', enables mixed precision
+    training (fp16) and sets a longer pause duration in the training callback.
+
+
+    Args:
+        device_name (str): The device to use for training ('cuda' or other).
+
+    Returns:
+        tuple: A tuple containing the TrainingArguments object and a
+            PauseTrainingCallback object.
+    """
+
+    if device_name == "cuda":
+        # Define training arguments
+        training_args = TrainingArguments(
+            output_dir="./results",  # Output directory for model checkpoints
+            num_train_epochs=3,  # Number of training epochs
+            gradient_accumulation_steps=4,  # Accumulate gradients over 4 steps
+            per_device_train_batch_size=1,  # Batch size per device during training
+            per_device_eval_batch_size=1,  # Batch size for evaluation
+            warmup_steps=500,  # Number of warmup steps for learning rate scheduler
+            weight_decay=0.01,  # Weight decay strength
+            logging_dir="./logs",  # Directory for storing logs
+            save_steps=500,  # Save model every 500 steps
+            fp16=True,  # Enable mixed precision (only works on supported hardware)
+            save_total_limit=2,  # Keep only the last two checkpoints
+            dataloader_num_workers=2,  # Number of workers for data loading
+            load_best_model_at_end=True,
+            run_name="Verkada Model",
+            eval_strategy="epoch",  # Evaluate after each epoch
+            save_strategy="epoch",  # Save model after each epoch
+            remove_unused_columns=False,
+            disable_tqdm=False,
+            gradient_checkpointing=True,
+        )
+
+        pause_callback = PauseTrainingCallback(
+            pause_after_steps=10000, pause_duration=15
+        )
+    else:
+        # Define training arguments
+        training_args = TrainingArguments(
+            output_dir="./results",  # Output directory for model checkpoints
+            num_train_epochs=2,  # Number of training epochs
+            gradient_accumulation_steps=2,  # Accumulate gradients over 2 steps
+            per_device_train_batch_size=1,  # Batch size per device during training
+            per_device_eval_batch_size=1,  # Batch size for evaluation
+            warmup_steps=100,  # Number of warmup steps for learning rate scheduler
+            weight_decay=0.01,  # Weight decay strength
+            logging_dir="./logs",  # Directory for storing logs
+            save_steps=200,  # Save model every 200 steps
+            save_total_limit=1,  # Keep only the last two checkpoints
+            dataloader_num_workers=0,  # Number of workers for data loading
+            load_best_model_at_end=True,
+            run_name="Verkada Model",
+            eval_strategy="epoch",  # Evaluate after each epoch
+            save_strategy="epoch",  # Save model after each epoch
+            remove_unused_columns=False,
+            disable_tqdm=False,
+            dataloader_drop_last=True,
+            dataloader_pin_memory=True,
+            gradient_checkpointing=True,
+        )
+
+        pause_callback = PauseTrainingCallback(
+            pause_after_steps=500, pause_duration=60
+        )
+
+    return training_args, pause_callback
+
+
+def train_model(model, device_name, tokenizer, file_name, generate_squad):
     """
     Trains a model using text data from a specified file.
 
@@ -226,76 +274,77 @@ def train_model(model, tokenizer, file_name):
 
     Args:
         model (PreTrainedModel): The model to be trained.
+        device_name (str): The device to use for training (CPU, GPU, or MPS).
         tokenizer (PreTrainedTokenizer): The tokenizer associated with
             the model.
         file_name (str): The path to the file containing the training data.
+        generate_squad (bool): Tells the model whether or not it needs to
+            generate new SQuAD data.
 
     Returns:
-        None
+        PreTrainedModel: The custom-trained transformer.
 
     Examples:
         train_model(my_model, my_tokenizer, "data.txt")
     """
-    # Load the scraped data
-    with open(file_name, "r", encoding="utf-8") as file:
-        text_data = file.read()  # Read the entire dataset as a single string
-
-    # Split the text into smaller documents by double newlines
-    documents = text_data.split("\n\n")
-
-    # Chunk the documents into smaller pieces
-    chunked_docs = []
-    print("Documents that exceed the max length will be split further.")
-    for doc in tqdm(
-        iter(documents), total=len(documents), desc="Processing documents"
-    ):
-        chunked_docs.extend(chunk_text(doc))
-
-    # Create a dataset from the chunked documents
-    print(
-        f"Total chunks created: {len(chunked_docs)}"
-    )  # Debugging number of chunks created
-    dataset = Dataset.from_dict({"text": chunked_docs})
-
-    # Tokenize the dataset
-    dataset = dataset.map(tokenize_function, batched=True)
-
-    # Ensure the dataset contains the correct columns
-    dataset.set_format(
-        type="torch", columns=["input_ids", "attention_mask", "labels"]
+    squad_dataset, chunks = preprocess_custom_data(
+        file_name,
+        tokenizer,
+        model,
+        device_name,
+        generate_squad,
     )
 
-    # Define training arguments
-    training_args = TrainingArguments(
-        output_dir="./results",  # Output directory for model checkpoints
-        num_train_epochs=3,  # Number of training epochs
-        gradient_accumulation_steps=4,  # Accumulate gradients over 4 steps
-        per_device_train_batch_size=1,  # Batch size per device during training
-        per_device_eval_batch_size=1,  # Batch size for evaluation
-        warmup_steps=500,  # Number of warmup steps for learning rate scheduler
-        weight_decay=0.01,  # Weight decay strength
-        logging_dir="./logs",  # Directory for storing logs
-        save_steps=500,  # Save model every 500 steps
-        save_total_limit=2,  # Keep only the last two checkpoints
-        dataloader_num_workers=cpu_count(),  # Number of workers for data loading
+    chunk_size = 50  # Training chunks
+    train_chunks = [
+        squad_dataset["train"].select(
+            range(i, min(i + chunk_size, len(squad_dataset["train"])))
+        )
+        for i in range(0, len(squad_dataset["train"]), chunk_size)
+    ]
+    validation_chunks = [
+        squad_dataset["validation"].select(
+            range(i, min(i + chunk_size, len(squad_dataset["validation"])))
+        )
+        for i in range(0, len(squad_dataset["validation"]), chunk_size)
+    ]
+
+    training_args, pause_callback = set_training_args(device_name)
+
+    # test_dataset = squad_dataset["test"]
+
+    data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
+
+    print("Starting fine-tuning process.")
+    print(f"Starting training on {device_name}...")
+
+    tuning_batches = list(zip(train_chunks, validation_chunks))
+    print(f"Will train {len(tuning_batches)} amount of times.")
+
+    progress_bar = tqdm(
+        total=len(tuning_batches),
+        desc="Overall Progress",
+        position=1,
+        unit="Training batch",
     )
+    for train_chunk, val_chunk in tuning_batches:
+        # Initialize Trainer
+        trainer = Trainer(
+            model=model,
+            args=training_args,
+            compute_metrics=partial(compute_metrics, tokenizer=tokenizer),
+            train_dataset=train_chunk,
+            eval_dataset=val_chunk,
+            data_collator=data_collator,
+            callbacks=[pause_callback],  # pause to allow cool down period
+        )
 
-    pause_callback = PauseTrainingCallback(
-        pause_after_steps=500, pause_duration=60
-    )
+        # Fine-tune the model
+        trainer.train()
+        progress_bar.update(1)
 
-    # Initialize Trainer
-    trainer = Trainer(
-        model=model,
-        args=training_args,
-        train_dataset=dataset,
-        callbacks=[pause_callback],  # pause to allow cool down period
-    )
+        # Save the fine-tuned model
+        model.save_pretrained("./fine_tuned_verkada")
+        tokenizer.save_pretrained("./fine_tuned_verkada")
 
-    # Fine-tune the model
-    print(f"Starting training on {device}...")
-    trainer.train()
-
-    # Save the fine-tuned model
-    model.save_pretrained("./fine_tuned_verkada_gpt2")
-    tokenizer.save_pretrained("./fine_tuned_verkada_gpt2")
+    return model, chunks
