@@ -83,7 +83,7 @@ def retrieve(query, chunks, model, tokenizer, device):
         )
     else:
         # Encode the chunks
-        chunk_embeddings = embed_chunks(chunks[::20], model, tokenizer, device)
+        chunk_embeddings = embed_chunks(chunks, model, tokenizer, device)
         torch.save(chunk_embeddings, "chunk_embeddings.emb")
 
     # Calculate similarity between the query and each chunk (cosine similarity)

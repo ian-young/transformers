@@ -77,16 +77,15 @@ def process_chunks(
     """
     batch_entries = []
 
-    #! Shortening data for testing purposes
     progress_bar = tqdm(
-        total=len(chunks[::20]),
+        total=len(chunks),
         desc="Processing chunks",
         unit="chunk",
         colour="cyan",
         dynamic_ncols=True,
         smoothing=0.5,
     )
-    for i, chunk in enumerate(chunks[::20]):
+    for i, chunk in enumerate(chunks):
         if i in processed_indices or i < len(processed_indices):
             progress_bar.update(1)
             continue  # Skip already processed indices
@@ -238,9 +237,9 @@ def generate_squad_format_with_checkpoint(
             checkpoint_file,
             batch_size,
         )
-    elif max(processed_indices) != len(chunks[::20]) - 1:
+    elif max(processed_indices) != len(chunks) - 1:
         print(
-            f"Continuing from {max(processed_indices)} to get to {len(chunks[::20]) - 1}."
+            f"Continuing from {max(processed_indices)} to get to {len(chunks) - 1}."
         )
         process_chunks(
             processed_indices,
