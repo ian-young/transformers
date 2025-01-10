@@ -1,3 +1,15 @@
+# Ignore trained models
+fine_tuned_verkada
+results
+verkada_data.txt
+squad_data.json
+squad_data_backup.json
+chunk_embeddings.emb
+batch_tracking.tmp
+
+# DS Store
+.DS_Store
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
