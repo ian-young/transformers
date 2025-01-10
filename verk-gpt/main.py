@@ -44,7 +44,7 @@ from transformers import (
 USE_BACKUP = True
 GENERATE_SQUAD_DATA = True
 V_TRAIN = True
-QUERY = "What is Verkada access control?"
+QUERY = "How much power does a CD42 draw?"
 CHECKPOINT_PATH = "./fine_tuned_verkada"
 
 
