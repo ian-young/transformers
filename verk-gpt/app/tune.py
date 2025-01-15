@@ -291,7 +291,7 @@ def train_model(model, device_name, tokenizer, file_name, generate_squad):
     """
     if exists("batch_tracking.tmp"):
         print("Resuming from previous training session.")
-        with open("batch_tracking.tmp", 'r', encoding='utf-8') as file:
+        with open("batch_tracking.tmp", "r", encoding="utf-8") as file:
             batch_number = file.readline().strip()
     else:
         batch_number = 0
@@ -360,7 +360,7 @@ def train_model(model, device_name, tokenizer, file_name, generate_squad):
         model.save_pretrained("./fine_tuned_verkada")
         tokenizer.save_pretrained("./fine_tuned_verkada")
 
-        with open("batch_tracking.tmp", 'w', encoding='utf-8') as file:
+        with open("batch_tracking.tmp", "w", encoding="utf-8") as file:
             file.write(str(idx))
 
     remove("batch_tracking.tmp")  # Remove the temporary file
