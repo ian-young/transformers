@@ -46,7 +46,7 @@ if ! command_exists brew; then
 fi
 
 if ! command_exists docker; then
-	echo"Docker not found. Installing Docker"
+	echo "Docker not found. Installing Docker"
 	brew install --cask docker
 
 	# Start docker
@@ -56,6 +56,7 @@ if ! command_exists docker; then
 	# Wait for the Docker daemon to start
 	echo "Waiting for Docker to start."
 	while ! docker info >/dev/null 2>&1; do
+		echo "Please open the Docker application in your launchpad and follow the setup steps."
 		sleep 5
 		echo "Checking if Docker has started..."
 	done
