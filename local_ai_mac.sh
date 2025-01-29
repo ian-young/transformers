@@ -38,6 +38,21 @@ check_ollama_model() {
 		ollama pull "$model"
 	fi
 }
+
+start_ollama() {
+	open /Applications/Ollama.app
+
+	# Wait for the Ollama daemon to start
+	if ! ollama list >/dev/null 2>&1; then
+		echo "Please open the Ollama application in your launchpad if it has not alreaddy opened and follow the setup steps."
+	fi
+	while ! ollama list >/dev/null 2>&1; do
+		sleep 5
+		echo "Checking if Ollama has started..."
+	done
+	echo "Ollama is running!"
+}
+
 # Check if brew is available
 if ! command_exists brew; then
 	echo "Brew not found. Installing Homebrew"
@@ -64,27 +79,37 @@ if ! command_exists docker; then
 fi
 
 # Check if Python is available
-if ! command_exists python3.10 2>&1; then
+if ! command_exists python3.10; then
 	echo "Installing Python 3.10 as this is the most compatible version."
 	brew install python@3.10
 fi
 
-if ! command_exists ollama 2>&1; then
-	echo "Installing Ollama for locally hosted AI"
-	
-	# Download the zip file
-	curl -L -o "$ZIP_FILE" "$OLLAMA_URL"
-
-	# Unzip the contents
-	unzip -q "$ZIP_FILE" -d "$TEMP_DIR"
-
-	# Move the .app file to the Applications folder
-	if [ -d "$TEMP_DIR/Ollama.app" ]; then
-		mv -f "$TEMP_DIR/Ollama.app" "$APP_DIR"
+# Check if Ollama is available
+if ! command_exists ollama; then
+	if [ -d "/Applications/Ollama.app"]; then
+		start_ollama
 	else
-		echo "Error: Ollama.app not found in extracted files." >&2
-		rm -rf "$TEMP_DIR"
-		exit 1
+		echo "Installing Ollama for locally hosted AI"
+
+		# Download the zip file
+		curl -L "$OLLAMA_URL" -o "$ZIP_FILE"
+		if [ $? -ne 0 ]; then
+			echo "Failed to download Ollama from $OLLAMA_URL" >&2
+			rm -rf "$TEMP_DIR"
+			exit 1
+		fi
+
+		# Unzip the contents
+		unzip -q "$ZIP_FILE" -d "$TEMP_DIR"
+
+		# Move the .app file to the Applications folder
+		if [ -d "$TEMP_DIR/Ollama.app" ]; then
+			mv -f "$TEMP_DIR/Ollama.app" "$APP_DIR"
+			start_ollama
+		else
+			echo "Error: Ollama.app not found in extracted files." >&2
+			rm -rf "$TEMP_DIR"
+			exit 1
 	fi
 
 	# Clean up temporary files
@@ -92,24 +117,33 @@ if ! command_exists ollama 2>&1; then
 fi
 
 # Start the downloads
-echo "Prepping Brain"
+echo "Prepping the brain"
+sleep 0.5
 brew update
 brew upgrade
 brew cleanup
+
+echo "Installing Ollama models"
+sleep 0.5
 check_ollama_model "llama3.2"
 check_ollama_model "gemma2"
 check_ollama_model "codellama"
+
+sleep 0.5
+echo "Pulling Docker containers"
 check_docker_image "containrrr/watchtower"
 check_docker_image "ghcr.io/open-webui/open-webui" "main"
 
+echo "Shipping"
 # Start a single user instance of open-webui
 docker run -d -p 3000:8080 -e WEBUI_AUTH=False -v open-webui:/app/backend/data --name open-webui ghcr.io/open-webui/open-webui:main
 
 # Start watchtower to automatically update open-webui
 docker run -d --name watchtower --volume /var/run/docker.sock:/var/run/docker.sock containrrr/watchtower -i 300 open-webui
+echo "Shipped!"
 
-echo "Base install complete! Feel free to navigate to http://localhost:3000/ to interact with your private AI model on your own private web server (locked down to only one user).\n"
-read -p "Would you like to install Stable Diffusion for image generation?\nThis will take some manual interaction to finish the configuration.\n(y/n) " response
+echo "Base install complete! Feel free to navigate to http://localhost:3000/ to interact with your private AI model on your own private web server (locked down to only one user)."
+read -p "Would you like to install Stable Diffusion for image generation?\nThis will take some manual interaction to finish the configuration.(y/n) " response
 case "$response" in
 	[yY][eE][sS]|[yY]) # Accept "yes", "Yes", "y", and "Y"
 		echo "Proceeding with installation..."
