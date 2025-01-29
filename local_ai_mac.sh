@@ -144,8 +144,8 @@ echo "Shipped!"
 
 echo "Base install complete! Feel free to navigate to http://localhost:3000/ to interact with your private AI model on your own private web server (locked down to only one user)."
 read -p "Would you like to install Stable Diffusion for image generation?\nThis will take some manual interaction to finish the configuration.(y/n) " response
-case "$response" in
-	[yY][eE][sS]|[yY]) # Accept "yes", "Yes", "y", and "Y"
+case "$response" in 
+	[yY][eE][sS]|[yY]); # Accept "yes", "Yes", "y", and "Y"
 		echo "Proceeding with installation..."
 		
 		# Check if git is installed
@@ -160,7 +160,7 @@ case "$response" in
 		# Create a service so Stable Diffusion is launched on system startup
 		echo "Creating service for Stable Diffusion to begin on startup"
 		plist_path="$HOME/Library/LaunchAgents/com.stable-diffusion.plist"
-		cat <<EOF > "plist_path"
+		cat <<EOF > "$plist_path"
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
