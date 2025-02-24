@@ -2,8 +2,8 @@
 fine_tuned_verkada
 results
 verkada_data.txt
-squad_data.json
-squad_data_backup.json
+squad_data.jsonl
+squad_data_backup.jsonl
 chunk_embeddings.emb
 batch_tracking.tmp
 
