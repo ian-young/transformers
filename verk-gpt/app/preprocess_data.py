@@ -39,6 +39,17 @@ CHECKPOINT_FILE = "squad_data.jsonl"
 logging.getLogger("transformers").setLevel(logging.ERROR)
 
 
+def replace_unicode(text):
+    unicode_replacements = {
+        "\u2019": "'",
+        "\u201c": '"',
+        "\u201d": '"'
+    }
+    for unicode_char, replacement in unicode_replacements.items():
+        text = text.replace(unicode_char, replacement)
+    return text
+
+
 def process_chunks(
     processed_indices,
     chunks,
@@ -134,7 +145,7 @@ def process_chunks(
 
                 # Write to file in MLX format. See:
                 # https://github.com/ml-explore/mlx-examples/blob/main/llms/mlx_lm/LORA.md#data
-                mlx_entry = {"prompt": question, "completion": answer}
+                mlx_entry = {"prompt": replace_unicode(question), "completion": replace_unicode(answer)}
                 batch_entries.append(mlx_entry)
 
                 if len(batch_entries) >= batch_size:
