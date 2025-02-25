@@ -34,7 +34,7 @@ from datasets import Dataset
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 
-CHECKPOINT_FILE = "squad_data.json"
+CHECKPOINT_FILE = "squad_data.jsonl"
 
 # Suppress transformers warnings
 logging.getLogger("transformers").setLevel(logging.ERROR)
@@ -421,7 +421,7 @@ def preprocess_custom_data(
 
     print("Splitting training and testing data")
     squad_data = []
-    with open("squad_data.json", "r", encoding="UTF-8") as file:
+    with open("squad_data.jsonl", "r", encoding="UTF-8") as file:
         squad_data.extend(json.loads(line.strip()) for line in file)
     train_data, test_data = train_test_split(squad_data, test_size=0.2)
     test_data, validation_data = train_test_split(test_data, test_size=1 / 3)
