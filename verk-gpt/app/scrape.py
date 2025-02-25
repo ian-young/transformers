@@ -79,7 +79,10 @@ def truncate_text(text):
                                         "exceed the terminal width.")
     """
     max_length = get_terminal_size().columns
-    print(f"{text[:max_length - 3]}..." if len(text) > max_length else text, end="\r")
+    print(
+        f"{text[:max_length - 3]}..." if len(text) > max_length else text,
+        end="\r",
+    )
 
 
 def chunk_urls(urls, num_chunks):
@@ -187,7 +190,9 @@ def scrape_urls(urls, visited_urls, lock):
         elif "text/html" in response.headers.get("Content-Type", ""):
 
             # Get all paragraphs and headings
-            paragraphs = soup.find_all(["p", "h1", "h2", "h3", "h4", "h5", "h6"])
+            paragraphs = soup.find_all(
+                ["p", "h1", "h2", "h3", "h4", "h5", "h6"]
+            )
             data = "\n".join(
                 [
                     para.get_text().strip()
@@ -210,7 +215,9 @@ def scrape_urls(urls, visited_urls, lock):
 
         with ThreadPoolExecutor(max_workers=cpu_count() * 2) as executor:
             # Scrape links from this page and add to the list
-            executor.submit(scrape_links, url, soup, urls, visited_urls, count, lock)
+            executor.submit(
+                scrape_links, url, soup, urls, visited_urls, count, lock
+            )
 
 
 def extract_text_from_pdf(pdf_content):
@@ -296,11 +303,15 @@ def scrape_links(url, soup, urls, visited_urls, count, lock):
                     ]
                 )
                 or re.search(r"verkada.com/ja", full_url, re.IGNORECASE)
-                or re.search(r"intercom-attachments-7", full_url, re.IGNORECASE)
+                or re.search(
+                    r"intercom-attachments-7", full_url, re.IGNORECASE
+                )
                 or not re.search(r"verkada", full_url, re.IGNORECASE)
             ):
                 count += 1
-                truncate_text(f"\033[K{Fore.RED}Skipping {count}{Style.RESET_ALL}")
+                truncate_text(
+                    f"\033[K{Fore.RED}Skipping {count}{Style.RESET_ALL}"
+                )
                 # truncate_text(
                 #     f"{Fore.RED}Skipping "
                 #     f"{Fore.LIGHTBLACK_EX}{full_url}{Style.RESET_ALL}"
@@ -320,6 +331,8 @@ if __name__ == "__main__":
     processed_urls = set()
     thread_lock = threading.Lock()
     try:
-        scrape_website(["https://docs.verkada.com"], processed_urls, thread_lock)
+        scrape_website(
+            ["https://docs.verkada.com"], processed_urls, thread_lock
+        )
     except KeyboardInterrupt:
         print("Exiting...")
