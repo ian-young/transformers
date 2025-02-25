@@ -30,7 +30,8 @@ Usage:
 import threading
 import math
 import re
-from os import cpu_count
+import warnings
+from os import cpu_count, get_terminal_size
 from json import dumps
 from concurrent.futures import ThreadPoolExecutor
 
@@ -41,6 +42,12 @@ from colorama import Fore, Style, init
 
 init(autoreset=True)
 
+warnings.filterwarnings(
+    "ignore",
+    category=UserWarning,
+    message=".*It looks like you're parsing an XML document using an HTML parser.*",
+)
+
 # Define a headers dictionary with a common User-Agent string
 headers = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -50,6 +57,29 @@ headers = {
 # Create and clear out the file
 with open("verkada_data.txt", "w", encoding="utf-8") as v_file:
     v_file.write("")
+
+
+def truncate_text(text):
+    """
+    Truncates text to fit within the terminal width.
+
+    This function takes a string as input and shortens it if it exceeds
+    the current width of the terminal window. An ellipsis is appended to
+    indicate that the text has been truncated.
+
+    Args:
+        text (str): The text to be truncated.
+
+    Returns:
+        str: The truncated text, or the original text if it fits within
+            the terminal width.
+
+    Examples:
+        truncated_text = truncate_text("This is a long string that might "
+                                        "exceed the terminal width.")
+    """
+    max_length = get_terminal_size().columns
+    print(f"{text[:max_length - 3]}..." if len(text) > max_length else text, end="\r")
 
 
 def chunk_urls(urls, num_chunks):
@@ -98,7 +128,7 @@ def scrape_website(urls, visited_urls, lock):
     Examples:
         scrape_website(["http://example.com", "http://example.org"], visited_urls, lock)
     """
-    max_workers = min(cpu_count() * 2, len(urls))
+    max_workers = min(cpu_count(), len(urls))
     url_chunks = chunk_urls(urls, max_workers)
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         for chunk in url_chunks:
@@ -137,27 +167,27 @@ def scrape_urls(urls, visited_urls, lock):
 
             visited_urls.add(url)  # Mark this URL as visited
 
-        print(
-            f"{Fore.GREEN}Scraping {Fore.LIGHTBLACK_EX}{url}{Style.RESET_ALL}"
+        count = 0
+        truncate_text(
+            f"\033[K{Fore.GREEN}Scraping {Fore.LIGHTBLACK_EX}{url}{Style.RESET_ALL}"
         )
         data = ""
         response = requests.get(
             url, headers=headers, timeout=5
         )  # Make the request to the URL
-        soup = BeautifulSoup(response.content, "html.parser")
+        soup = BeautifulSoup(response.content.decode("utf-8"), "html.parser")
 
         if "application/pdf" in response.headers.get("Content-Type", ""):
-            print(
-                f"{Fore.CYAN}Extracting{Style.RESET_ALL}"
+            truncate_text(
+                f"\033[K"
+                f"{Fore.CYAN}Extracting{Style.RESET_ALL} "
                 f"text from PDF at {Fore.LIGHTBLACK_EX}{url}{Style.RESET_ALL}"
             )
             data = extract_text_from_pdf(response.content)
         elif "text/html" in response.headers.get("Content-Type", ""):
 
             # Get all paragraphs and headings
-            paragraphs = soup.find_all(
-                ["p", "h1", "h2", "h3", "h4", "h5", "h6"]
-            )
+            paragraphs = soup.find_all(["p", "h1", "h2", "h3", "h4", "h5", "h6"])
             data = "\n".join(
                 [
                     para.get_text().strip()
@@ -165,10 +195,10 @@ def scrape_urls(urls, visited_urls, lock):
                     if "Sorry, Internet Explorer is not supported"
                     not in para.get_text()
                 ]
-            )
+            ).replace("\n", " ")
         else:
-            print(
-                f"Skipping {Fore.RED}non-HTML{Style.RESET_ALL} "
+            truncate_text(
+                f"\033[KSkipping {Fore.RED}non-HTML{Style.RESET_ALL} "
                 f"content from {Fore.LIGHTBLACK_EX}{url}{Style.RESET_ALL}"
             )
 
@@ -180,7 +210,7 @@ def scrape_urls(urls, visited_urls, lock):
 
         with ThreadPoolExecutor(max_workers=cpu_count() * 2) as executor:
             # Scrape links from this page and add to the list
-            executor.submit(scrape_links, url, soup, urls, visited_urls, lock)
+            executor.submit(scrape_links, url, soup, urls, visited_urls, count, lock)
 
 
 def extract_text_from_pdf(pdf_content):
@@ -215,7 +245,7 @@ def extract_text_from_pdf(pdf_content):
     return text
 
 
-def scrape_links(url, soup, urls, visited_urls, lock):
+def scrape_links(url, soup, urls, visited_urls, count, lock):
     """
     Extracts and processes links from a given webpage's HTML content.
 
@@ -232,6 +262,7 @@ def scrape_links(url, soup, urls, visited_urls, lock):
         urls (list): A list to store newly found URLs for scraping.
         visited_urls (set): A set to track URLs that have already been
             visited.
+        count (int): Skip count
         lock (Lock): A threading lock to synchronize access to shared
             resources.
 
@@ -259,19 +290,21 @@ def scrape_links(url, soup, urls, visited_urls, lock):
                     domain in full_url
                     for domain in [
                         "linkdin.com",
+                        "linkedin.com",
                         "github.com",
+                        "twitter.com",
                     ]
                 )
                 or re.search(r"verkada.com/ja", full_url, re.IGNORECASE)
-                or re.search(
-                    r"intercom-attachments-7", full_url, re.IGNORECASE
-                )
+                or re.search(r"intercom-attachments-7", full_url, re.IGNORECASE)
                 or not re.search(r"verkada", full_url, re.IGNORECASE)
             ):
-                print(
-                    f"{Fore.RED}Skipping"
-                    f"{Fore.LIGHTBLACK_EX}{full_url}{Style.RESET_ALL}"
-                )
+                count += 1
+                truncate_text(f"\033[K{Fore.RED}Skipping {count}{Style.RESET_ALL}")
+                # truncate_text(
+                #     f"{Fore.RED}Skipping "
+                #     f"{Fore.LIGHTBLACK_EX}{full_url}{Style.RESET_ALL}"
+                # )
                 continue  # Skip the URL
 
             # Check if this URL has already been added to avoid duplicates
@@ -287,8 +320,6 @@ if __name__ == "__main__":
     processed_urls = set()
     thread_lock = threading.Lock()
     try:
-        scrape_website(
-            ["https://docs.verkada.com"], processed_urls, thread_lock
-        )
+        scrape_website(["https://docs.verkada.com"], processed_urls, thread_lock)
     except KeyboardInterrupt:
         print("Exiting...")

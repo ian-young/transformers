@@ -25,7 +25,6 @@ Usage:
 
 import logging
 import json
-import uuid
 from multiprocessing import Pool, cpu_count
 from os.path import exists
 from re import sub
@@ -92,9 +91,7 @@ def process_chunks(
 
         # Context with look-back
         context = (
-            "".join(
-                [chunk["data"] for chunk in chunks[max(0, i - look_back) : i]]
-            )
+            "".join([chunk["data"] for chunk in chunks[max(0, i - look_back) : i]])
             + chunk["data"]
         )
 
@@ -119,9 +116,7 @@ def process_chunks(
             # Split into question and answer
             if tokenizer.sep_token in qa_text:
 
-                question, answer = qa_text.split(
-                    tokenizer.sep_token, maxsplit=1
-                )
+                question, answer = qa_text.split(tokenizer.sep_token, maxsplit=1)
                 normalized_answer = sub("/s+", "", answer.strip())
 
                 answer_start = context.find(answer.strip())
@@ -133,26 +128,14 @@ def process_chunks(
                     continue
 
                 if normalized_answer in ["Verkada", "Verkada Inc."]:
-                    progress_bar.write(
-                        f"Skipping chunk {i} | Answer is too simple."
-                    )
+                    progress_bar.write(f"Skipping chunk {i} | Answer is too simple.")
                     progress_bar.update(1)
                     continue
 
-                # Write to file in SQuAD format. See:
-                # https://huggingface.co/datasets/rajpurkar/squad
-                squad_entry = {
-                    "answers": {
-                        "answer_start": answer_start,
-                        "text": normalized_answer,
-                    },
-                    "context": context,
-                    "id": str(uuid.uuid4()),  # Unique ID
-                    "question": question.strip(),
-                    "title": chunk["url"],  # Placeholder title
-                    "index": i,
-                }
-                batch_entries.append(squad_entry)
+                # Write to file in MLX format. See:
+                # https://github.com/ml-explore/mlx-examples/blob/main/llms/mlx_lm/LORA.md#data
+                mlx_entry = {"prompt": question, "completion": answer}
+                batch_entries.append(mlx_entry)
 
                 if len(batch_entries) >= batch_size:
                     with open(checkpoint_file, "a", encoding="utf-8") as file:
@@ -238,9 +221,7 @@ def generate_squad_format_with_checkpoint(
             batch_size,
         )
     elif max(processed_indices) != len(chunks) - 1:
-        print(
-            f"Continuing from {max(processed_indices)} to get to {len(chunks) - 1}."
-        )
+        print(f"Continuing from {max(processed_indices)} to get to {len(chunks) - 1}.")
         process_chunks(
             processed_indices,
             chunks,
@@ -369,9 +350,7 @@ def chunk_text(data, tokenizer, max_size=192, overlap=50):
     return chunks
 
 
-def preprocess_custom_data(
-    file_name, tokenizer, qa_model, device_name, generate_squad
-):
+def preprocess_custom_data(file_name, tokenizer, qa_model, device_name, generate_squad):
     """
     Preprocesses custom text data for question-answering model training.
 
@@ -398,16 +377,12 @@ def preprocess_custom_data(
         text_data = file.read()
 
     # Split and chunk the text
-    documents = [
-        json.loads(doc) for doc in text_data.split("\n\n") if doc.strip()
-    ]
+    documents = [json.loads(doc) for doc in text_data.split("\n\n") if doc.strip()]
     chunked_docs = []
     print("Chunking large documents...")
 
     with Pool(cpu_count()) as pool:
-        chunked_docs = pool.starmap(
-            chunk_text, [(doc, tokenizer) for doc in documents]
-        )
+        chunked_docs = pool.starmap(chunk_text, [(doc, tokenizer) for doc in documents])
 
     chunked_docs = [item for sublist in chunked_docs for item in sublist]
     if generate_squad:
@@ -431,6 +406,15 @@ def preprocess_custom_data(
     train_dataset = prepare_squad_dataset(train_data, tokenizer)
     test_dataset = prepare_squad_dataset(test_data, tokenizer)
     validation_dataset = prepare_squad_dataset(validation_data, tokenizer)
+
+    with open("data/train.jsonl", "w", encoding="utf-8") as file:
+        file.write(train_dataset)
+
+    with open("data/test.jsonl", "w", encoding="utf-8") as file:
+        file.write(test_dataset)
+
+    with open("data/valid.jsonl", "w", encoding="utf-8") as file:
+        file.write(validation_dataset)
 
     return {
         "train": train_dataset,
