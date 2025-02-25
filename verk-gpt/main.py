@@ -41,7 +41,7 @@ from transformers import (
     AutoTokenizer,
 )
 
-USE_BACKUP = True
+USE_BACKUP = False
 GENERATE_SQUAD_DATA = True
 V_TRAIN = True
 QUERY = "How much power does a CD42 draw?"
