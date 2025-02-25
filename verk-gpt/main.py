@@ -32,12 +32,9 @@ from app.tune import (  # Importing the function to start training
     train_model,
 )
 
-
 USE_BACKUP = False
 GENERATE_SQUAD_DATA = True
 V_TRAIN = True
-QUERY = "How much power does a CD42 draw?"
-CHECKPOINT_PATH = "./fine_tuned_verkada"
 
 
 def main():
