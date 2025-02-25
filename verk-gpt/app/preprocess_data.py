@@ -25,6 +25,7 @@ Usage:
 
 import logging
 import json
+from os.path import exists
 from multiprocessing import Pool, cpu_count
 from re import match, split
 
@@ -112,6 +113,7 @@ def process_chunks(
             + chunk["data"]
         )
 
+        progress_bar.write("\033[KGenerating Question", end="\r")
         question_response: ChatResponse = chat(
             model="mistral:instruct",
             messages=[
@@ -129,6 +131,7 @@ def process_chunks(
                 },
             ],
         )
+        progress_bar.write("\033[KGenerating Answer", end="\r")
         answer_response: ChatResponse = chat(
             model="mistral:instruct",
             messages=[
@@ -156,14 +159,13 @@ def process_chunks(
             "completion": replace_unicode(answer),
         }
         batch_entries.append(mlx_entry)
-
         if len(batch_entries) >= batch_size:
             with open(checkpoint_file, "a", encoding="utf-8") as file:
                 for entry in batch_entries:
                     file.write(json.dumps(entry) + "\n")
             batch_entries = []  # Reset the batch
 
-            progress_bar.update(1)
+        progress_bar.update(1)
 
     progress_bar.write("Writing remaining entries to checkpoint.")
     progress_bar.close()
@@ -174,9 +176,7 @@ def process_chunks(
 
 
 def generate_squad_format_with_checkpoint(
-    chunks,
-    look_back=1,
-    batch_size=75,
+    chunks, look_back=1, batch_size=5, checkpoint_file=CHECKPOINT_FILE
 ):
     """Generates SQuAD-formatted question-answer pairs from text chunks
     with checkpoint resuming capability.
@@ -188,17 +188,11 @@ def generate_squad_format_with_checkpoint(
 
     Args:
         chunks (list): A list of dictionaries with text chunks to process.
-        qa_model (PreTrainedModel): The question-answering model used to
-            generate Q&A pairs.
-        tokenizer (PreTrainedTokenizer): The tokenizer associated with
-            the QA model.
-        device_name (str): The device (e.g., 'cuda', 'cpu') to run the
-            model on.
         look_back (int, optional): Number of chunks to include before the
             current chunk. Defaults to 1.
+        batch_size (int, optional): How many batches to process in a chunk.
         checkpoint_file (str, optional): Path to the checkpoint file for
             resuming processing.
-        batch_size (int, optional): How many batches to process in a chunk.
 
     Returns:
         None: Writes SQuAD-formatted Q&A pairs to the checkpoint file.
@@ -209,6 +203,13 @@ def generate_squad_format_with_checkpoint(
         IndexError: If there are indexing issues during processing.
     """
     processed_indices = set()
+    if exists(checkpoint_file):
+        print("Resuming from checkpoint...")
+        idx = 0
+        with open(checkpoint_file, "r", encoding="utf-8") as file:
+            for _ in file:
+                processed_indices.add(idx)
+                idx += 1
 
     if not processed_indices:
         process_chunks(
@@ -253,38 +254,45 @@ def chunk_text(data, overlap=50):
     """
 
     def is_number_with_decimal(sentence):
-        # Check if the sentence is a number with decimal
         return bool(match(r"^\d+\.\d+$", sentence))
 
-    sentences = split(r"(?<=[.!?]) +", data["text"])
+    if isinstance(data, dict) and "text" in data:
+        text = data["text"]
+    elif isinstance(data, str):
+        text = data
+    else:
+        raise ValueError("Expected a dictionary with 'text' key or a string.")
+
+    # Handle cases where there is no punctuation
+    if all(c not in ".!?" for c in text):
+        sentences = [text]
+    else:
+        sentences = split(r"(?<=[.!?]) +", text)
 
     chunks = []
     current_chunk = []
 
     for sentence in sentences:
         if is_number_with_decimal(sentence):
-            # Combine with the previous sentence if it's a number with decimal
             if current_chunk:
                 current_chunk[-1] += f" {sentence}"
             else:
                 current_chunk.append(sentence)
         else:
+            # Always append the sentence to current_chunk
             current_chunk.append(sentence)
+            # Check for the desired length or ends with a punctuation mark
+            if len(current_chunk) == 5 or sentence.endswith("."):
+                chunk = " ".join(current_chunk).strip()
+                chunks.append(
+                    {
+                        "url": data.get("url", None),
+                        "data": chunk,
+                    }
+                )
+                # Update current_chunk to include the overlap
+                current_chunk = current_chunk[-overlap:] if overlap > 0 else []
 
-        if len(current_chunk) == 5 or sentence.endswith("."):
-            # Join the current chunk into a single string
-            chunk = " ".join(current_chunk).strip()
-
-            # Add metadata to the chunk
-            chunks.append(
-                {
-                    "url": data["url"],
-                    "data": chunk,
-                }
-            )
-
-            # Maintain overlap by keeping the last `overlap` sentences for the next chunk
-            current_chunk = current_chunk[-overlap:] if overlap > 0 else []
     return chunks
 
 
@@ -318,7 +326,7 @@ def preprocess_custom_data(file_name, generate_squad):
     print("Chunking large documents...")
 
     with Pool(cpu_count()) as pool:
-        chunked_docs = pool.starmap(chunk_text, documents)
+        chunked_docs = pool.map(chunk_text, documents)
 
     chunked_docs = [item for sublist in chunked_docs for item in sublist]
     if generate_squad:
@@ -335,10 +343,13 @@ def preprocess_custom_data(file_name, generate_squad):
     test_data, validation_data = train_test_split(test_data, test_size=1 / 3)
 
     with open("data/train.jsonl", "w", encoding="utf-8") as file:
-        file.write(train_data)
+        for line in train_data:
+            file.write(str(line))
 
     with open("data/test.jsonl", "w", encoding="utf-8") as file:
-        file.write(test_data)
+        for line in test_data:
+            file.write(str(line))
 
     with open("data/valid.jsonl", "w", encoding="utf-8") as file:
-        file.write(validation_data)
+        for line in validation_data:
+            file.write(str(line))

@@ -32,7 +32,7 @@ from app.tune import (  # Importing the function to start training
     train_model,
 )
 
-USE_BACKUP = False
+USE_BACKUP = True
 GENERATE_SQUAD_DATA = True
 V_TRAIN = True
 
