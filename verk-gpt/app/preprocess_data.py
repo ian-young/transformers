@@ -68,6 +68,7 @@ def process_chunks(
     chunks,
     look_back,
     batch_size,
+    questions=1,
     checkpoint_file=CHECKPOINT_FILE,
 ):
     """Processes text chunks to generate question-answer pairs.
@@ -87,6 +88,8 @@ def process_chunks(
             context.
         batch_size (int): The number of entries to accumulate before
             writing to the checkpoint file.
+        questions (int): The number of Q&A pairs to generate per chunk.
+            Defaults to 1 pair. (Optional)
         checkpoint_file (str): The path to the file where the processed
             data will be saved. (Optional)
     """
@@ -113,52 +116,73 @@ def process_chunks(
             + chunk["data"]
         )
 
-        progress_bar.write("\033[KGenerating Question", end="\r")
-        question_response: ChatResponse = chat(
-            model="mistral:instruct",
-            messages=[
-                {
-                    "role": "system",
-                    "content": "Create a question as though you are a "
-                    "user based on the given data. The question "
-                    "should be clear, friendly, precise, and "
-                    "concise. It should be no longer than a few "
-                    "sentences.",
-                },
-                {
-                    "role": "user",
-                    "content": context,
-                },
-            ],
-        )
-        progress_bar.write("\033[KGenerating Answer", end="\r")
-        answer_response: ChatResponse = chat(
-            model="mistral:instruct",
-            messages=[
-                {
-                    "role": "system",
-                    "content": "Create a consultative answer based"
-                    "on the given data and question. The answer "
-                    "should be clear,friendly, precise, and "
-                    "concise. It should be no longer than a few "
-                    "sentences.",
-                },
-                {
-                    "role": "user",
-                    "content": f"{question_response['message']['content']} {context}",
-                },
-            ],
-        )
+        g_questions, g_answers = [], []
+        for i in range(questions):
+            # Generate a realistic user question given the chunk data
+            progress_bar.write("\033[KGenerating Question", end="\r")
+            question_response: ChatResponse = chat(
+                model="mistral:instruct",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "Create a question as though you are a "
+                        "user based on the given data. The question "
+                        "should be clear, friendly, precise, and "
+                        "concise. It should be no longer than a few "
+                        "sentences.",
+                    },
+                    {
+                        "role": "user",
+                        "content": context,
+                    },
+                ],
+            )
+            # Generate the answer pair based on the same chunk data
+            progress_bar.write("\033[KGenerating Answer", end="\r")
+            answer_response: ChatResponse = chat(
+                model="mistral:instruct",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "Create a consultative answer based"
+                        "on the given data and question. The answer "
+                        "should be clear, friendly, precise, and "
+                        "concise. It should be no longer than a few "
+                        "sentences.",
+                    },
+                    {
+                        "role": "user",
+                        "content": f"{question_response['message']['content']} {context}",
+                    },
+                ],
+            )
+            g_questions.append(question_response)
+            g_answers.append(answer_response)
 
-        question = question_response["message"]["content"]
-        answer = answer_response["message"]["content"]
-        # Write to file in MLX format. See:
-        # https://github.com/ml-explore/mlx-examples/blob/main/llms/mlx_lm/LORA.md#data
-        mlx_entry = {
-            "prompt": replace_unicode(question),
-            "completion": replace_unicode(answer),
-        }
-        batch_entries.append(mlx_entry)
+        for i in range(questions):
+            question = g_questions[i]["message"]["content"]
+            answer = g_answers[i]["message"]["content"]
+
+            # Write to file in MLX format. See:
+            # https://github.com/ml-explore/mlx-examples/blob/main/llms/mlx_lm/LORA.md#data
+            mlx_entry = {
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": (
+                            "You give clear, friendly, precise, and concise"
+                            " answers to the user along with consultative adivce."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": replace_unicode(question),
+                    },
+                    {"role": "assistant", "content": replace_unicode(answer)},
+                ]
+            }
+            batch_entries.append(mlx_entry)
+
         if len(batch_entries) >= batch_size:
             with open(checkpoint_file, "a", encoding="utf-8") as file:
                 for entry in batch_entries:
@@ -176,7 +200,7 @@ def process_chunks(
 
 
 def generate_squad_format_with_checkpoint(
-    chunks, look_back=1, batch_size=5, checkpoint_file=CHECKPOINT_FILE
+    chunks, look_back=0, batch_size=5, checkpoint_file=CHECKPOINT_FILE
 ):
     """Generates SQuAD-formatted question-answer pairs from text chunks
     with checkpoint resuming capability.
@@ -189,7 +213,7 @@ def generate_squad_format_with_checkpoint(
     Args:
         chunks (list): A list of dictionaries with text chunks to process.
         look_back (int, optional): Number of chunks to include before the
-            current chunk. Defaults to 1.
+            current chunk. Defaults to 0.
         batch_size (int, optional): How many batches to process in a chunk.
         checkpoint_file (str, optional): Path to the checkpoint file for
             resuming processing.
@@ -213,20 +237,14 @@ def generate_squad_format_with_checkpoint(
 
     if not processed_indices:
         process_chunks(
-            processed_indices,
-            chunks,
-            look_back,
-            batch_size,
+            processed_indices, chunks, look_back, batch_size, questions=2
         )
     elif max(processed_indices) != len(chunks) - 1:
         print(
-            f"Continuing from {max(processed_indices)} to get to {len(chunks) - 1}."
+            f"Continuing from {max(processed_indices) + 1} to get to {len(chunks)}."
         )
         process_chunks(
-            processed_indices,
-            chunks,
-            look_back,
-            batch_size,
+            processed_indices, chunks, look_back, batch_size, questions=2
         )
     else:
         print("Chunks already processed. Skipping...")
@@ -282,7 +300,9 @@ def chunk_text(data, overlap=50):
             # Always append the sentence to current_chunk
             current_chunk.append(sentence)
             # Check for the desired length or ends with a punctuation mark
-            if len(current_chunk) == 5 or sentence.endswith("."):
+            if len(current_chunk) == 15 or (
+                sentence.endswith(".") and sentence == sentences[-1]
+            ):
                 chunk = " ".join(current_chunk).strip()
                 chunks.append(
                     {
