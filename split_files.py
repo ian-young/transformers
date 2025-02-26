@@ -13,7 +13,10 @@ documents = [json.loads(doc) for doc in text_data.split("\n\n") if doc.strip()]
 
 # Create a progress bar to display the progress of splitting the data
 progress_bar = tqdm(
-    total=len(documents), desc="Splitting documents", unit="Document", colour="green"
+    total=len(documents),
+    desc="Splitting documents",
+    unit="Document",
+    colour="green",
 )
 
 # Iterate over each document and write it to a new file with its URL as the filename
@@ -22,7 +25,7 @@ for line in documents:
     url = line["url"]
 
     # Sanitize the URL: Replace invalid filename characters with underscores
-    url = re.sub(r'https?://', '', url)  # Remove 'http://' or 'https://'
+    url = re.sub(r"https?://", "", url)  # Remove 'http://' or 'https://'
     # url = url.split('/')[0] + url.split('/')[1]  # Keep only the domain part (before the first '/')
     url = re.sub(r'[\/:*?"<>|]', "_", url)
     url = url[:50]
