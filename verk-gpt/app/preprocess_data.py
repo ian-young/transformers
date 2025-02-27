@@ -63,6 +63,68 @@ def replace_unicode(text):
     return text
 
 
+def generate_qa_entry(
+    progress_bar,
+    context,
+):
+    """Generates a question-answer pair based on the given context.
+
+    This function uses a question-answering model to generate a question and
+    its corresponding answer based on the provided context. The generated
+    question and answer are returned as ChatResponse objects.
+
+    Args:
+        progress_bar (tqdm.tqdm): A progress bar instance to update during
+            question and answer generation.
+        context (str): The text context used to generate the Q&A pair.
+
+    Returns:
+        tuple: A tuple containing the question and answer ChatResponse objects.
+
+    Examples:
+        question, answer = generate_qa_entry(progress_bar, "Some context text.")
+    """
+    progress_bar.write("\033[KGenerating Question", end="\r")
+    question_response: ChatResponse = chat(
+        model="mistral:instruct",
+        messages=[
+            {
+                "role": "system",
+                "content": "Create a question as though you are a "
+                "user based on the given data. The question "
+                "should be clear, friendly, precise, and "
+                "concise. It should be no longer than a few "
+                "sentences.",
+            },
+            {
+                "role": "user",
+                "content": context,
+            },
+        ],
+    )
+    # Generate the answer pair based on the same chunk data
+    progress_bar.write("\033[KGenerating Answer", end="\r")
+    answer_response: ChatResponse = chat(
+        model="mistral:instruct",
+        messages=[
+            {
+                "role": "system",
+                "content": "Create a consultative answer based"
+                "on the given data and question. The answer "
+                "should be clear, friendly, precise, and "
+                "concise. It should be no longer than a few "
+                "sentences.",
+            },
+            {
+                "role": "user",
+                "content": f"{question_response['message']['content']} {context}",
+            },
+        ],
+    )
+
+    return question_response, answer_response
+
+
 def process_chunks(
     processed_indices,
     chunks,
@@ -106,6 +168,7 @@ def process_chunks(
     for i, chunk in enumerate(chunks):
         if i in processed_indices or i < len(processed_indices):
             count = 1
+            # Keep track of complete chunks and generated questions
             if count % questions:
                 progress_bar.update(1)
             count += 1
@@ -120,51 +183,17 @@ def process_chunks(
         )
 
         g_questions, g_answers = [], []
-        for i in range(questions):
+        for _ in range(questions):
             # Generate a realistic user question given the chunk data
-            progress_bar.write("\033[KGenerating Question", end="\r")
-            question_response: ChatResponse = chat(
-                model="mistral:instruct",
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "Create a question as though you are a "
-                        "user based on the given data. The question "
-                        "should be clear, friendly, precise, and "
-                        "concise. It should be no longer than a few "
-                        "sentences.",
-                    },
-                    {
-                        "role": "user",
-                        "content": context,
-                    },
-                ],
-            )
-            # Generate the answer pair based on the same chunk data
-            progress_bar.write("\033[KGenerating Answer", end="\r")
-            answer_response: ChatResponse = chat(
-                model="mistral:instruct",
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "Create a consultative answer based"
-                        "on the given data and question. The answer "
-                        "should be clear, friendly, precise, and "
-                        "concise. It should be no longer than a few "
-                        "sentences.",
-                    },
-                    {
-                        "role": "user",
-                        "content": f"{question_response['message']['content']} {context}",
-                    },
-                ],
+            question_response, answer_response = generate_qa_entry(
+                progress_bar, context
             )
             g_questions.append(question_response)
             g_answers.append(answer_response)
 
-        for i in range(questions):
-            question = g_questions[i]["message"]["content"]
-            answer = g_answers[i]["message"]["content"]
+        for q in range(questions):
+            question = g_questions[q]["message"]["content"]
+            answer = g_answers[q]["message"]["content"]
 
             # Write to file in MLX format. See:
             # https://github.com/ml-explore/mlx-examples/blob/main/llms/mlx_lm/LORA.md#data
@@ -237,6 +266,7 @@ def generate_qa_with_checkpoint(
         with open(checkpoint_file, "r", encoding="utf-8") as file:
             for idx, _ in enumerate(file):
                 count_chunk = False
+                # Track the difference between a processed question and a completed chunk
                 if idx % questions:
                     count_chunk = True
                 if count_chunk:
@@ -376,12 +406,12 @@ def preprocess_custom_data(file_name, generate_squad):
 
     with open("data/train.jsonl", "w", encoding="utf-8") as file:
         for line in train_data:
-            file.write(str(line))
+            file.write(json.dumps(line) + "\n")
 
     with open("data/test.jsonl", "w", encoding="utf-8") as file:
         for line in test_data:
-            file.write(str(line))
+            file.write(json.dumps(line) + "\n")
 
     with open("data/valid.jsonl", "w", encoding="utf-8") as file:
         for line in validation_data:
-            file.write(str(line))
+            file.write(json.dumps(line) + "\n")
