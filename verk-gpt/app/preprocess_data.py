@@ -202,7 +202,7 @@ def process_chunks(
                 file.write(json.dumps(entry) + "\n")
 
 
-def generate_squad_format_with_checkpoint(
+def generate_qa_with_checkpoint(
     chunks, look_back=0, batch_size=5, checkpoint_file=CHECKPOINT_FILE
 ):
     """Generates SQuAD-formatted question-answer pairs from text chunks
@@ -363,7 +363,7 @@ def preprocess_custom_data(file_name, generate_squad):
     chunked_docs = [item for sublist in chunked_docs for item in sublist]
     if generate_squad:
         # Generate SQuAD-like data
-        generate_squad_format_with_checkpoint(
+        generate_qa_with_checkpoint(
             chunks=chunked_docs,
         )
 

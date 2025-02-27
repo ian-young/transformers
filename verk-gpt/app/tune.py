@@ -33,35 +33,7 @@ import subprocess
 from threading import Lock
 
 import app.scrape as scrape  # Importing the scrape functionality
-import numpy as np
-import evaluate
-import torch
 from app.preprocess_data import preprocess_custom_data
-
-
-def set_torch_device(model=None):
-    """Sets the appropriate device for the model based on the available
-    hardware.
-
-    Args:
-        model (optional): The model to be set on the appropriate device.
-
-    Returns:
-        model: The model with the device set.
-        device (str): The device being used (GPU, CPU, or MPS).
-    """
-    # Check if MPS is available on Apple Silicon
-    if torch.backends.mps.is_available():
-        device_name = "mps"
-    elif torch.cuda.is_available():
-        device_name = "cuda"
-    else:
-        device_name = "cpu"
-
-    if model:
-        model.to(device_name)
-
-    return model, device_name
 
 
 def scrape_and_save():
@@ -95,42 +67,6 @@ def scrape_and_save():
         urls, visited_urls, lock
     )  # Calling the scrape function to save data
     print("Scraping complete, data saved to verkada_data.txt.")
-
-
-def compute_metrics(p, tokenizer):
-    """
-    Computes the Exact Match (EM) and F1 score for the model predictions.
-
-    Args:
-        p: Tuple containing the predictions and labels
-            p.predictions (numpy array): Model's predicted token IDs
-            p.label_ids (numpy array): Ground truth token IDs
-        tokenizer (PreTrainedTokenizer): The tokenizer associated with
-            the model.
-
-    Returns:
-        dict: Dictionary containing the EM and F1 scores
-    """
-    # Load the ROUGE metric
-    rouge = evaluate.load("rouge")
-
-    # Get predictions and labels
-    logits = p.predictions[0]
-    pred_token_ids = np.argmax(logits, axis=-1)
-    labels = p.label_ids
-
-    # Decode the predicted and label token IDs to text
-    decoded_preds = tokenizer.batch_decode(
-        pred_token_ids, skip_special_tokens=True
-    )
-    decoded_labels = tokenizer.batch_decode(labels, skip_special_tokens=True)
-
-    # Strip leading/trailing whitespaces from the predictions and labels
-    decoded_preds = [pred.strip() for pred in decoded_preds]
-    decoded_labels = [label.strip() for label in decoded_labels]
-
-    # Compute ROUGE score
-    return rouge.compute(predictions=decoded_preds, references=decoded_labels)
 
 
 def train_model(file_name, generate_squad):
