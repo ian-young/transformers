@@ -27,25 +27,14 @@ Usage:
     from data scraping to model evaluation.
 """
 
-from os.path import exists
-
-import app
 from app.tune import (  # Importing the function to start training
     scrape_and_save,
     train_model,
 )
 
-import torch
-from transformers import (
-    AutoModelForSeq2SeqLM,
-    AutoTokenizer,
-)
-
-USE_BACKUP = False
+USE_BACKUP = True
 GENERATE_SQUAD_DATA = True
 V_TRAIN = True
-QUERY = "How much power does a CD42 draw?"
-CHECKPOINT_PATH = "./fine_tuned_verkada"
 
 
 def main():
@@ -66,69 +55,20 @@ def main():
         # Step 1: Scrape websites for data
         if not USE_BACKUP:
             scrape_and_save()
-        checkpoint_path = "./fine_tuned_verkada"
-
-        if exists(checkpoint_path):
-            print(
-                f"Loading model and tokenizer from checkpoint: {checkpoint_path}"
-            )
-            qa_model = AutoModelForSeq2SeqLM.from_pretrained(checkpoint_path)
-            tokenizer = AutoTokenizer.from_pretrained(checkpoint_path)
-        else:
-            # Step 2: Load the model and tokenizer (will be used for fine-tuning after training)
-            qa_model_name = "potsawee/t5-large-generation-squad-QuestionAnswer"
-            print(
-                f"No checkpoint found. Initializing from base model: {qa_model_name}"
-            )
-            qa_model = AutoModelForSeq2SeqLM.from_pretrained(qa_model_name)
-            tokenizer = AutoTokenizer.from_pretrained(qa_model_name)
-
-        file_name = (
-            "verkada_data_backup.txt" if USE_BACKUP else "verkada_data.txt"
-        )
-
-        qa_model, device = app.set_torch_device(qa_model)
-        tokenizer.pad_token = tokenizer.eos_token
 
         if V_TRAIN:
             print("Training on Verkada.")
-            model, chunks = train_model(
-                qa_model,
-                device,
-                tokenizer,
+            file_name = (
+                "verkada_data_backup.txt" if USE_BACKUP else "verkada_data.txt"
+            )
+
+            train_model(
                 file_name,
                 GENERATE_SQUAD_DATA,
             )
         else:
             print("Skipping product training")
-            model = qa_model
-            chunks = []
 
-        # Step 4: Querying example (for inference using retriever and QA model)
-        relevant_chunks = app.retrieve(
-            query=QUERY,
-            chunks=chunks,
-            model=model,
-            tokenizer=tokenizer,
-            device=device,
-        )
-
-        # Choose the most relevant chunk (for simplicity)
-        context = relevant_chunks["data"]
-        input_text = f"question: {QUERY} context: {context}"
-        inputs = tokenizer(
-            input_text,
-            return_tensors="pt",
-            truncation=True,
-            padding=True,
-            max_length=512,
-        ).to(device)
-
-        # Generate the answer
-        with torch.no_grad():
-            outputs = model.generate(**inputs, max_new_tokens=100)
-        answer = tokenizer.decode(outputs[0], skip_special_tokens=True)
-        print(f"Response: {answer}\nSee {relevant_chunks['url']}")
     except KeyboardInterrupt:
         print("Exiting...")
 
