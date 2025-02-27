@@ -24,8 +24,8 @@ The flow of the script has been greatly simplified:
         chunk_text
         preprocess_custom_data
         process_chunks
-        prepare_squad_data
         replace_unicode
+        generate_qa_entry
 
     end
 
@@ -38,5 +38,5 @@ The flow of the script has been greatly simplified:
 
     train_model -.-> preprocess_custom_data
 
-    preprocess_custom_data --> chunk_text --> generate_qa_with_checkpoint --> process_chunks --> replace_unicode --> prepare_squad_data
+    preprocess_custom_data --> chunk_text --> generate_qa_with_checkpoint --> process_chunks --> generate_qa_entry --> replace_unicode
 ```
