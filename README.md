@@ -34,7 +34,7 @@ The flow of the script has been greatly simplified:
     scrape_and_save -.-> scrape_website
     scrape_website --> chunk_urls --> scrape_urls
     scrape_urls --PDF--> extract_text_from_pdf
-    scrape_urls --Webapge--> scrape_links
+    scrape_urls --Webpage--> scrape_links
 
     train_model -.-> preprocess_custom_data
 
