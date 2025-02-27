@@ -105,7 +105,10 @@ def process_chunks(
     )
     for i, chunk in enumerate(chunks):
         if i in processed_indices or i < len(processed_indices):
-            progress_bar.update(1)
+            count = 1
+            if count % questions:
+                progress_bar.update(1)
+            count += 1
             continue  # Skip already processed indices
 
         # Context with look-back
@@ -226,14 +229,19 @@ def generate_squad_format_with_checkpoint(
         KeyError: If there are missing keys in the model output.
         IndexError: If there are indexing issues during processing.
     """
+    questions = 2  # How many questions to generate per chunk
     processed_indices = set()
     if exists(checkpoint_file):
         print("Resuming from checkpoint...")
-        idx = 0
+        chunk_count = 0
         with open(checkpoint_file, "r", encoding="utf-8") as file:
-            for _ in file:
-                processed_indices.add(idx)
-                idx += 1
+            for idx, _ in enumerate(file):
+                count_chunk = False
+                if idx % questions:
+                    count_chunk = True
+                if count_chunk:
+                    chunk_count += 1
+                    processed_indices.add(chunk_count)
 
     if not processed_indices:
         process_chunks(
@@ -244,7 +252,11 @@ def generate_squad_format_with_checkpoint(
             f"Continuing from {max(processed_indices) + 1} to get to {len(chunks)}."
         )
         process_chunks(
-            processed_indices, chunks, look_back, batch_size, questions=2
+            processed_indices,
+            chunks,
+            look_back,
+            batch_size,
+            questions=questions,
         )
     else:
         print("Chunks already processed. Skipping...")
