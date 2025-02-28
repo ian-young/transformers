@@ -400,7 +400,12 @@ def preprocess_custom_data(file_name, generate_squad):
     print("Splitting training and testing data")
     squad_data = []
     with open("squad_data.jsonl", "r", encoding="UTF-8") as file:
-        squad_data.extend(json.loads(line.strip()) for line in file)
+        for line in file:
+            stripped_line = line.strip()
+            # Skip any comments
+            if stripped_line.startswith('//'):
+                continue
+            squad_data.append(json.loads(stripped_line))
     train_data, test_data = train_test_split(squad_data, test_size=0.2)
     test_data, validation_data = train_test_split(test_data, test_size=1 / 3)
 
