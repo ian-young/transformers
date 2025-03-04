@@ -89,15 +89,17 @@ def train_model(file_name, generate_squad):
     Examples:
         train_model(my_model, my_tokenizer, "data.txt")
     """
+    # We will be using a quantized version of tral instmiruct 7b
     command = [
         "mlx_lm.lora",
         "--train",
         "--model",
-        "mistralai/Mistral-7B-Instruct-v0.3",
+        "https://huggingface.co/unsloth/mistral-7b-instruct-v0.3-bnb-4bit",
         "--data",
         "data/",
         "--batch-size",
         "2",
+        "--grad-checkpont",  # Reduce memory, increase compute
     ]
     preprocess_custom_data(
         file_name,
