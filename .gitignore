@@ -10,7 +10,6 @@ unsloth_compiled_cache
 test.jsonl
 train.jsonl
 valid.jsonl
-verk-gpt
 
 # DS Store
 .DS_Store
