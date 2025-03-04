@@ -99,9 +99,13 @@ def train_model(file_name, generate_squad):
         from datasets import Dataset
 
         with open(file_path, "r", encoding="utf-8") as file:
-            data = [loads(line) for line in file]
+            # Extract the relevant text data from loaded webpages
+            data = [loads(line)[1]["text"]["data"] for line in file]
 
-        return Dataset.from_list(data)
+        # Format the data in a raw entry dictionary to be ingested into
+        # Unsloth for fine-tuning
+        dict_data = [{"text": f"{entry}"} for entry in data]
+        return Dataset.from_list(dict_data)
 
     command = [
         "mlx_lm.lora",
@@ -121,10 +125,8 @@ def train_model(file_name, generate_squad):
     print("Starting fine-tuning process.")
     if platform.system() == "Windows":
         from unsloth import FastLanguageModel, is_bfloat16_supported
-        from json import loads
         from trl import SFTTrainer
         from transformers import TrainingArguments
-        from datasets import load_dataset
 
         max_seq_length = 2048  # Supports RoPE Scaling internally
         train_dataset = load_jsonl("data/train.jsonl")
@@ -140,45 +142,52 @@ def train_model(file_name, generate_squad):
 
         # Do model patching and add fast LoRA weights
         model = FastLanguageModel.get_peft_model(
-        model,
-        r = 16,
-        target_modules = ["q_proj", "k_proj", "v_proj", "o_proj",
-                        "gate_proj", "up_proj", "down_proj",],
-        lora_alpha = 16,
-        lora_dropout = 0, # Supports any, but = 0 is optimized
-        bias = "none",    # Supports any, but = "none" is optimized
-        # [NEW] "unsloth" uses 30% less VRAM, fits 2x larger batch sizes!
-        use_gradient_checkpointing = "unsloth", # True or "unsloth" for very long context
-        random_state = 3407,
-        max_seq_length = max_seq_length,
-        use_rslora = False,  # We support rank stabilized LoRA
-        loftq_config = None, # And LoftQ
+            model,
+            r=16,
+            target_modules=[
+                "q_proj",
+                "k_proj",
+                "v_proj",
+                "o_proj",
+                "gate_proj",
+                "up_proj",
+                "down_proj",
+            ],
+            lora_alpha=16,
+            lora_dropout=0,  # Supports any, but = 0 is optimized
+            bias="none",  # Supports any, but = "none" is optimized
+            # [NEW] "unsloth" uses 30% less VRAM, fits 2x larger batch sizes!
+            use_gradient_checkpointing="unsloth",  # True or "unsloth" for very long context
+            random_state=3407,
+            max_seq_length=max_seq_length,
+            use_rslora=False,  # We support rank stabilized LoRA
+            loftq_config=None,  # And LoftQ
         )
 
         trainer = SFTTrainer(
-            model = model,
-            train_dataset = train_dataset,
+            model=model,
+            train_dataset=train_dataset,
             eval_dataset=validation_dataset,
-            dataset_text_field = "text",
-            max_seq_length = max_seq_length,
-            tokenizer = tokenizer,
-            args = TrainingArguments(
-                per_device_train_batch_size = 2,
-                gradient_accumulation_steps = 4,
-                warmup_steps = 10,
-                max_steps = 60,
-                fp16 = not is_bfloat16_supported(),
-                bf16 = is_bfloat16_supported(),
-                logging_steps = 1,
-                output_dir = "outputs",
-                save_strategy = "steps",
-                save_steps = 50,
-                optim = "adamw_8bit",  # Degrading weights
+            dataset_text_field="text",
+            max_seq_length=max_seq_length,
+            tokenizer=tokenizer,
+            args=TrainingArguments(
+                per_device_train_batch_size=2,
+                gradient_accumulation_steps=4,
+                warmup_steps=10,
+                max_steps=60,
+                fp16=not is_bfloat16_supported(),
+                bf16=is_bfloat16_supported(),
+                logging_steps=1,
+                output_dir="outputs",
+                save_strategy="steps",
+                save_steps=50,
+                optim="adamw_8bit",  # Degrading weights
             ),
         )
 
         # Begin training
-        trainer.train(resume_from_checkpoint = True)
+        trainer.train(resume_from_checkpoint=True)
 
     try:
         # Start the process and open stdout in text mode
