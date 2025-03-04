@@ -30,7 +30,10 @@ Usage:
 
 # pylint: disable=redefined-outer-name
 import subprocess
+import platform
 from threading import Lock
+
+import dataset
 
 import app.scrape as scrape  # Importing the scrape functionality
 from app.preprocess_data import preprocess_custom_data
@@ -89,6 +92,17 @@ def train_model(file_name, generate_squad):
     Examples:
         train_model(my_model, my_tokenizer, "data.txt")
     """
+
+    def load_jsonl(file_path):
+        """Load a JSONL file into a Hugging Face Dataset"""
+        from json import loads
+        from datasets import Dataset
+
+        with open(file_path, "r", encoding="utf-8") as file:
+            data = [loads(line) for line in file]
+
+        return Dataset.from_list(data)
+
     command = [
         "mlx_lm.lora",
         "--train",
@@ -105,6 +119,67 @@ def train_model(file_name, generate_squad):
     )
 
     print("Starting fine-tuning process.")
+    if platform.system() == "Windows":
+        from unsloth import FastLanguageModel, is_bfloat16_supported
+        from json import loads
+        from trl import SFTTrainer
+        from transformers import TrainingArguments
+        from datasets import load_dataset
+
+        max_seq_length = 2048  # Supports RoPE Scaling internally
+        train_dataset = load_jsonl("data/train.jsonl")
+        test_dataset = load_jsonl("data/test.jsonl")
+        validation_dataset = load_jsonl("data/valid.jsonl")
+        # Load the model to be trained from HuggingFace
+        model, tokenizer = FastLanguageModel.from_pretrained(
+            model_name="unsloth/mistral-7b-instruct-v0.3-bnb-4bit",
+            max_seq_length=max_seq_length,
+            dtype=None,
+            load_in_4bit=True,
+        )
+
+        # Do model patching and add fast LoRA weights
+        model = FastLanguageModel.get_peft_model(
+        model,
+        r = 16,
+        target_modules = ["q_proj", "k_proj", "v_proj", "o_proj",
+                        "gate_proj", "up_proj", "down_proj",],
+        lora_alpha = 16,
+        lora_dropout = 0, # Supports any, but = 0 is optimized
+        bias = "none",    # Supports any, but = "none" is optimized
+        # [NEW] "unsloth" uses 30% less VRAM, fits 2x larger batch sizes!
+        use_gradient_checkpointing = "unsloth", # True or "unsloth" for very long context
+        random_state = 3407,
+        max_seq_length = max_seq_length,
+        use_rslora = False,  # We support rank stabilized LoRA
+        loftq_config = None, # And LoftQ
+        )
+
+        trainer = SFTTrainer(
+            model = model,
+            train_dataset = train_dataset,
+            eval_dataset=validation_dataset,
+            dataset_text_field = "text",
+            max_seq_length = max_seq_length,
+            tokenizer = tokenizer,
+            args = TrainingArguments(
+                per_device_train_batch_size = 2,
+                gradient_accumulation_steps = 4,
+                warmup_steps = 10,
+                max_steps = 60,
+                fp16 = not is_bfloat16_supported(),
+                bf16 = is_bfloat16_supported(),
+                logging_steps = 1,
+                output_dir = "outputs",
+                save_strategy = "steps",
+                save_steps = 50,
+                optim = "adamw_8bit",  # Degrading weights
+            ),
+        )
+
+        # Begin training
+        trainer.train(resume_from_checkpoint = True)
+
     try:
         # Start the process and open stdout in text mode
         process = subprocess.Popen(

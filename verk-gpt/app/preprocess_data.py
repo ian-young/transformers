@@ -25,6 +25,7 @@ Usage:
 
 import logging
 import json
+import platform
 from os.path import exists
 from multiprocessing import Pool, cpu_count
 from re import match, split
@@ -358,7 +359,7 @@ def chunk_text(data, overlap=50):
     return chunks
 
 
-def preprocess_custom_data(file_name, generate_squad):
+def preprocess_custom_data(file_name, generate_conversations):
     """
     Preprocesses custom text data for question-answering model training.
 
@@ -367,8 +368,8 @@ def preprocess_custom_data(file_name, generate_squad):
 
     Args:
         file_name (str): Path to the text file containing the dataset.
-        generate_squad (bool): Tells the model whether or not it needs to
-            generate new SQuAD data.
+        generate_conversations (bool): Tells the model whether or not it needs to
+            generate new conversational data.
 
     Returns:
         A processed dataset ready for model training.
@@ -391,32 +392,42 @@ def preprocess_custom_data(file_name, generate_squad):
         chunked_docs = pool.map(chunk_text, documents)
 
     chunked_docs = [item for sublist in chunked_docs for item in sublist]
-    if generate_squad:
-        # Generate SQuAD-like data
-        generate_qa_with_checkpoint(
-            chunks=chunked_docs,
-        )
 
-    print("Splitting training and testing data")
-    squad_data = []
-    with open("squad_data.jsonl", "r", encoding="UTF-8") as file:
-        for line in file:
-            stripped_line = line.strip()
-            # Skip any comments
-            if stripped_line.startswith('//'):
-                continue
-            squad_data.append(json.loads(stripped_line))
-    train_data, test_data = train_test_split(squad_data, test_size=0.2)
+    ai_data = []
+    if platform.system() == "Windows":
+        # Prepare dataset for Unsloth training
+        print("Windows detected. Using Unsloth")
+        ai_data = [{"text": item} for item in chunked_docs]
+    else:
+        # Prepare for training with mlx.lora
+        if generate_conversations:
+            # Generate conversation data
+            generate_qa_with_checkpoint(
+                chunks=chunked_docs,
+            )
+
+        print("Splitting training and testing data")
+        with open("squad_data.jsonl", "r", encoding="UTF-8") as file:
+            for line in file:
+                stripped_line = line.strip()
+                # Skip any comments
+                if stripped_line.startswith("//"):
+                    continue
+                ai_data.append(json.loads(stripped_line))
+
+    # Regardless of the training method, we need to have a train, test,
+    # and validation JSONL file inside the data folder
+    train_data, test_data = train_test_split(ai_data, test_size=0.2)
     test_data, validation_data = train_test_split(test_data, test_size=1 / 3)
 
     with open("data/train.jsonl", "w", encoding="utf-8") as file:
-        for line in train_data:
+        for line in tqdm(enumerate(train_data), "Writing Training Data"):
             file.write(json.dumps(line) + "\n")
 
     with open("data/test.jsonl", "w", encoding="utf-8") as file:
-        for line in test_data:
+        for line in tqdm(enumerate(test_data), "Writing Testing Data"):
             file.write(json.dumps(line) + "\n")
 
     with open("data/valid.jsonl", "w", encoding="utf-8") as file:
-        for line in validation_data:
+        for line in tqdm(enumerate(validation_data), "Writing Validation Data"):
             file.write(json.dumps(line) + "\n")
